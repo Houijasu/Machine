@@ -19,7 +19,7 @@ public sealed class AtomicTranspositionTable : ITranspositionTable
         public volatile int Version; // seqlock: even = stable, odd = write in progress
     }
 
-    private Bucket[] _buckets = Array.Empty<Bucket>();
+    private Bucket[] _buckets = [];
     private int _bucketCount;
     private byte _currentAge;
 

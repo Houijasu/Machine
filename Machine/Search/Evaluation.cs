@@ -52,8 +52,8 @@ public static class Evaluation
     }
 
     // Material values
-    private static readonly int[] PieceValMG = {0, 100, 320, 330, 500, 900, 0};
-    private static readonly int[] PieceValEG = {0, 100, 320, 330, 500, 900, 0};
+    private static readonly int[] PieceValMG = [0, 100, 320, 330, 500, 900, 0];
+    private static readonly int[] PieceValEG = [0, 100, 320, 330, 500, 900, 0];
 
     // Evaluate position in centipawns from side-to-move perspective
     public static int Evaluate(Position pos)

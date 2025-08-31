@@ -11,7 +11,7 @@ public sealed class PVTable
     private const int MaxPly = 128;
     private readonly Move[,] _pvArray = new Move[MaxPly, MaxPly];
     private readonly int[] _pvLength = new int[MaxPly];
-    
+
     public void Clear()
     {
         for (int i = 0; i < MaxPly; i++)
@@ -21,7 +21,7 @@ public sealed class PVTable
                 _pvArray[i, j] = Move.NullMove;
         }
     }
-    
+
     /// <summary>
     /// Update PV when a new best move is found
     /// Copies the PV from ply+1 and prepends the current move
@@ -29,16 +29,27 @@ public sealed class PVTable
     public void UpdatePV(int ply, Move move)
     {
         _pvArray[ply, ply] = move;
-        
+
         // Copy PV from next ply
         for (int i = ply + 1; i < ply + 1 + _pvLength[ply + 1]; i++)
         {
             _pvArray[ply, i] = _pvArray[ply + 1, i];
         }
-        
+
         _pvLength[ply] = _pvLength[ply + 1] + 1;
     }
-    
+
+        // Allow external reconstruction or seeding of PV rows
+        public void Set(int ply, int index, Move move)
+        {
+            if (ply < 0 || ply >= MaxPly) return;
+            if (index < 0 || index >= MaxPly) return;
+            _pvArray[ply, index] = move;
+            if (_pvLength[ply] < index + 1)
+                _pvLength[ply] = index + 1;
+        }
+
+
     /// <summary>
     /// Clear PV length at the start of a node
     /// </summary>
@@ -46,7 +57,7 @@ public sealed class PVTable
     {
         _pvLength[ply] = 0;
     }
-    
+
     /// <summary>
     /// Get the principal variation from root
     /// </summary>
@@ -57,7 +68,7 @@ public sealed class PVTable
             pv[i] = _pvArray[0, i];
         return pv;
     }
-    
+
     /// <summary>
     /// Get the best move from the root position
     /// </summary>

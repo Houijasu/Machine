@@ -58,8 +58,8 @@ public static class AttackTables
     {
         int r = sq / 8, f = sq % 8;
         ulong bb = 0;
-        int[] dr = { 2, 2, -2, -2, 1, 1, -1, -1 };
-        int[] df = { 1, -1, 1, -1, 2, -2, 2, -2 };
+        int[] dr = [2, 2, -2, -2, 1, 1, -1, -1];
+        int[] df = [1, -1, 1, -1, 2, -2, 2, -2];
         for (int i = 0; i < 8; i++)
         {
             int nr = r + dr[i], nf = f + df[i];

@@ -29,16 +29,18 @@ public sealed class SearchEngine
     private volatile bool _useRootSplit;
     private bool _rootSplitEnabled = true;
 
+    private bool _lastUsedRootSplit;
+
     public void SetRootSplit(bool enabled) => _rootSplitEnabled = enabled;
 
-    private readonly List<Thread> _helperThreads = new();
+    private readonly List<Thread> _helperThreads = [];
     private readonly PVTable _pvTable = new();
 
     // atomic counters for SMP
     private ulong _nodesSearched;
     private ulong _qNodesSearched;
     private int _selectiveDepth;
-    
+
     // Debug instrumentation counters
     private ulong _nullMoveCutoffs;
     private ulong _futilityPrunes;
@@ -47,35 +49,38 @@ public sealed class SearchEngine
     private ulong _singularExtensions;
     private ulong _checkExtensions;
     private ulong _lmrReductions;
+
+    // Global debug enable (readable from other components in DEBUG builds)
+    private static SearchEngine? _instance;
+    public static bool DebugEnabled => _instance?.EnableDebugInfo == true;
     public bool EnableDebugInfo { get; set; } = false;
 
+    // Aspiration window last score
+    private int _lastScore = int.MinValue;
 
-        // Aspiration window last score
-        private int _lastScore = int.MinValue;
-
-        // Feature toggles (UCI configurable)
-        public bool UseNullMove { get; private set; } = true;
-        public bool UseFutility { get; private set; } = true;
-        public bool UseAspiration { get; private set; } = true;
-        public bool UseRazoring { get; private set; } = true;
-        public bool UseExtensions { get; private set; } = true;
-        public bool UseProbCut { get; private set; } = true;
-        public bool UseSingularExtensions { get; private set; } = true;
+    // Feature toggles (UCI configurable)
+    public bool UseNullMove { get; private set; } = true;
+    public bool UseFutility { get; private set; } = true;
+    public bool UseAspiration { get; private set; } = true;
+    public bool UseRazoring { get; private set; } = true;
+    public bool UseExtensions { get; private set; } = true;
+    public bool UseProbCut { get; private set; } = true;
+    public bool UseSingularExtensions { get; private set; } = true;
 
 
-        public void SetFeature(string name, bool enabled)
+    public void SetFeature(string name, bool enabled)
+    {
+        switch (name)
         {
-            switch (name)
-            {
-                case nameof(UseNullMove): UseNullMove = enabled; break;
-                case nameof(UseFutility): UseFutility = enabled; break;
-                case nameof(UseAspiration): UseAspiration = enabled; break;
-                case nameof(UseRazoring): UseRazoring = enabled; break;
-                case nameof(UseExtensions): UseExtensions = enabled; break;
-                case nameof(UseProbCut): UseProbCut = enabled; break;
-                case nameof(UseSingularExtensions): UseSingularExtensions = enabled; break;
-            }
+            case nameof(UseNullMove): UseNullMove = enabled; break;
+            case nameof(UseFutility): UseFutility = enabled; break;
+            case nameof(UseAspiration): UseAspiration = enabled; break;
+            case nameof(UseRazoring): UseRazoring = enabled; break;
+            case nameof(UseExtensions): UseExtensions = enabled; break;
+            case nameof(UseProbCut): UseProbCut = enabled; break;
+            case nameof(UseSingularExtensions): UseSingularExtensions = enabled; break;
         }
+    }
 
     public ulong NodesSearched { get; private set; }
     public ulong QNodesSearched { get; private set; }
@@ -86,6 +91,7 @@ public sealed class SearchEngine
         _tt = useAtomicTT ? new AtomicTranspositionTable(hashSizeMb) : new TranspositionTable(hashSizeMb);
         _currentHashSize = hashSizeMb;
         _position = new Position();
+        _instance = this; // publish for debug-only helpers
     }
 
     public void SetPosition(Position position)
@@ -118,6 +124,13 @@ public sealed class SearchEngine
         }
     }
 
+    [Conditional("DEBUG")]
+    public void DebugLog(string kind, int depth, int ply, int alpha, int beta, int eval, string detail)
+    {
+        if (!EnableDebugInfo) return;
+        Console.WriteLine($"info string dbg kind={kind} d={depth} ply={ply} a={alpha} b={beta} e={eval} {detail}");
+    }
+
     public void ClearHash()
     {
         _tt.Clear();
@@ -142,7 +155,7 @@ public sealed class SearchEngine
         NodesSearched = 0;
         QNodesSearched = 0;
         SelectiveDepth = 0;
-        
+
         if (EnableDebugInfo)
             ResetDebugCounters();
 
@@ -176,15 +189,14 @@ public sealed class SearchEngine
                     result.SelectiveDepth = SelectiveDepth;
                     result.SearchTime = sw.Elapsed;
 
-                    // Get PV from PVTable
-                    var pvMoves = _pvTable.GetPV();
+                    // Build PV from TT for robust principal variation (handles TT cutoffs)
+                    var pvMoves = BuildPV(_position.Clone(), 32);
 
-                    // Set best move from PV
                     if (pvMoves.Length > 0)
                         result.BestMove = pvMoves[0];
 
                     Console.WriteLine(BuildInfoLine(depth, result.Score, result.SearchTime, result.NodesSearched, SelectiveDepth, pvMoves.AsSpan()));
-                    
+
                     // Print debug info if enabled
                     if (EnableDebugInfo && depth >= 5)
                     {
@@ -217,8 +229,12 @@ public sealed class SearchEngine
         const int beta = 30000;
 
         // Enable root-split from the main thread only
+        _lastUsedRootSplit = false;
         if (_rootSplitEnabled && depth >= 2 && _threadCount > 1 && threadIdx == 0)
+        {
+            _lastUsedRootSplit = true;
             return SearchAtDepthRootSplit(depth);
+        }
 
         var result = new SearchResult { Depth = depth };
 
@@ -267,6 +283,17 @@ public sealed class SearchEngine
         if (!_stopRequested)
         {
             result.Score = score;
+        // Rebuild PV if root-split was used
+            _lastUsedRootSplit = true;
+
+        if (_lastUsedRootSplit)
+        {
+            var clone = _position.Clone();
+            var pvMoves = BuildPV(clone, 32);
+            _pvTable.Clear();
+            for (int i = 0; i < pvMoves.Length; i++) _pvTable.Set(0, i, pvMoves[i]);
+        }
+
             result.BestMove = _pvTable.GetBestMove();
             if (result.BestMove.Equals(Move.NullMove))
                 result.BestMove = _tt.GetBestMove(_position);
@@ -451,6 +478,7 @@ public sealed class SearchEngine
                 else
                 {
                     int alpha = -30000, beta = 30000;
+
                     if (depth > 3)
                     {
                         int aspirationOffset = threadIdx * 75;
@@ -483,7 +511,7 @@ public sealed class SearchEngine
         Interlocked.Increment(ref _qNodesSearched);
         QNodesSearched = _qNodesSearched;
     }
-    
+
     // Debug instrumentation update methods
     public void IncrementNullMoveCutoffs() => Interlocked.Increment(ref _nullMoveCutoffs);
     public void IncrementFutilityPrunes() => Interlocked.Increment(ref _futilityPrunes);
@@ -492,14 +520,14 @@ public sealed class SearchEngine
     public void IncrementSingularExtensions() => Interlocked.Increment(ref _singularExtensions);
     public void IncrementCheckExtensions() => Interlocked.Increment(ref _checkExtensions);
     public void IncrementLMRReductions() => Interlocked.Increment(ref _lmrReductions);
-    
+
     public string GetDebugInfo()
     {
         if (!EnableDebugInfo) return string.Empty;
         return $"info string debug NullCuts:{_nullMoveCutoffs} Futility:{_futilityPrunes} Razor:{_razoringCutoffs} " +
                $"ProbCut:{_probCutCutoffs} Singular:{_singularExtensions} CheckExt:{_checkExtensions} LMR:{_lmrReductions}";
     }
-    
+
     private void ResetDebugCounters()
     {
         _nullMoveCutoffs = 0;

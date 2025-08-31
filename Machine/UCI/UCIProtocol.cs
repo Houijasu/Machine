@@ -38,11 +38,11 @@ public sealed class UCIProtocol
             {
                 Send($"id name {EngineName}");
                 Send($"id author {EngineAuthor}");
-                
+
                 // Core engine settings
                 Send("option name Hash type spin default 16 min 1 max 32768");  // Transposition table size in MB
                 Send("option name Threads type spin default 1 min 1 max 512");  // Number of search threads
-                
+
                 // Search enhancements
                 Send("option name NullMove type check default true");          // Enable null move pruning
                 Send("option name Futility type check default true");          // Enable futility pruning at shallow depths
@@ -51,22 +51,24 @@ public sealed class UCIProtocol
                 Send("option name Extensions type check default true");        // Enable check extensions
                 Send("option name ProbCut type check default true");           // Enable probabilistic cut
                 Send("option name SingularExtensions type check default true"); // Extend singular moves
-                
+
                 // Move ordering
                 Send("option name SEEPruning type check default true");        // Use SEE for move ordering
                 Send("option name SEEThreshold type spin default 0 min -500 max 500"); // SEE pruning threshold
-                
+
                 // Evaluation features
                 Send("option name Eval type check default true");              // Enable position evaluation
+                Send("option name DebugInfo type check default false");
+                Send("option name VerboseDebug type check default false");
                 Send("option name PST type check default true");               // Use piece-square tables
                 Send("option name PawnStructure type check default true");     // Evaluate pawn structure
                 Send("option name KingSafety type check default true");        // Evaluate king safety
-                
+
                 // Debug and analysis
                 Send("option name DebugInfo type check default false");        // Show pruning statistics
                 Send("option name UseNUMA type check default false");          // NUMA optimization (unused)
                 Send("option name HelperThreads type spin default 0 min 0 max 64"); // Extra helper threads (unused)
-                
+
                 Send("uciok");
             }
             else if (line == "isready")
@@ -235,7 +237,7 @@ public sealed class UCIProtocol
         }
         else if (name.Equals("SingularExtensions", StringComparison.OrdinalIgnoreCase) && value != null)
         {
-            if (bool.TryParse(value, out var b)) _searchEngine.SetFeature(nameof(_searchEngine.UseSingularExtensions), b);
+            if (bool.TryParse(value, out var b)) _searchEngine.SetFeature(nameof(_searchEngine.UseExtensions), b);
         }
         else if (name.Equals("DebugInfo", StringComparison.OrdinalIgnoreCase) && value != null)
         {
@@ -248,6 +250,10 @@ public sealed class UCIProtocol
         else if (name.Equals("NullMove", StringComparison.OrdinalIgnoreCase) && value != null)
         {
             if (bool.TryParse(value, out var b)) _searchEngine.SetFeature(nameof(_searchEngine.UseNullMove), b);
+        }
+        else if (name.Equals("VerboseDebug", StringComparison.OrdinalIgnoreCase) && value != null)
+        {
+            if (bool.TryParse(value, out var vb)) _searchEngine.EnableDebugInfo = vb; // reuse same switch for now
         }
         else if (name.Equals("SEEThreshold", StringComparison.OrdinalIgnoreCase) && value != null && int.TryParse(value, out var thr))
         {

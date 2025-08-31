@@ -13,10 +13,10 @@ public static class MoveOrdering
     private static int[,] _history = new int[64, 64];
 
     // Simple MVV-LVA victim values
-    private static readonly int[] PieceValue = new int[7]
-    {
+    private static readonly int[] PieceValue =
+    [
         0, 100, 320, 330, 500, 900, 0 // None, P, N, B, R, Q, K
-    };
+    ];
 
     private static bool _useSEEPruning = true;
     public static void SetSEEPruning(bool enabled) => _useSEEPruning = enabled;

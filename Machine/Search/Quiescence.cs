@@ -165,7 +165,7 @@ public static class Quiescence
         Color them = us == Color.White ? Color.Black : Color.White;
 
         // Piece values
-        Span<int> val = stackalloc int[] { 100, 320, 330, 500, 900, 20000 };
+        Span<int> val = [100, 320, 330, 500, 900, 20000];
 
         // Determine victim piece type on 'to' square
         int victimIdx;

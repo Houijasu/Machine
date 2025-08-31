@@ -34,8 +34,8 @@ public static class MagicConstants
     // TODO: Replace placeholder entries with Stockfish magics and (optionally) masks.
     // RookMagics[sq] and BishopMagics[sq] must be populated with correct constants.
 
-    public static readonly MagicEntry[] RookMagics = new MagicEntry[64]
-    {
+    public static readonly MagicEntry[] RookMagics =
+    [
         // Placeholder entries
         new(0UL, 52), new(0UL, 53), new(0UL, 53), new(0UL, 53), new(0UL, 53), new(0UL, 53), new(0UL, 53), new(0UL, 52),
         new(0UL, 53), new(0UL, 54), new(0UL, 54), new(0UL, 54), new(0UL, 54), new(0UL, 54), new(0UL, 54), new(0UL, 53),
@@ -44,11 +44,11 @@ public static class MagicConstants
         new(0UL, 53), new(0UL, 54), new(0UL, 54), new(0UL, 54), new(0UL, 54), new(0UL, 54), new(0UL, 54), new(0UL, 53),
         new(0UL, 53), new(0UL, 54), new(0UL, 54), new(0UL, 54), new(0UL, 54), new(0UL, 54), new(0UL, 54), new(0UL, 53),
         new(0UL, 53), new(0UL, 54), new(0UL, 54), new(0UL, 54), new(0UL, 54), new(0UL, 54), new(0UL, 54), new(0UL, 53),
-        new(0UL, 52), new(0UL, 53), new(0UL, 53), new(0UL, 53), new(0UL, 53), new(0UL, 53), new(0UL, 53), new(0UL, 52),
-    };
+        new(0UL, 52), new(0UL, 53), new(0UL, 53), new(0UL, 53), new(0UL, 53), new(0UL, 53), new(0UL, 53), new(0UL, 52)
+    ];
 
-    public static readonly MagicEntry[] BishopMagics = new MagicEntry[64]
-    {
+    public static readonly MagicEntry[] BishopMagics =
+    [
         // Placeholder entries
         new(0UL, 58), new(0UL, 59), new(0UL, 59), new(0UL, 59), new(0UL, 59), new(0UL, 59), new(0UL, 59), new(0UL, 58),
         new(0UL, 59), new(0UL, 59), new(0UL, 59), new(0UL, 59), new(0UL, 59), new(0UL, 59), new(0UL, 59), new(0UL, 59),
@@ -57,7 +57,7 @@ public static class MagicConstants
         new(0UL, 59), new(0UL, 59), new(0UL, 57), new(0UL, 55), new(0UL, 55), new(0UL, 57), new(0UL, 59), new(0UL, 59),
         new(0UL, 59), new(0UL, 59), new(0UL, 57), new(0UL, 57), new(0UL, 57), new(0UL, 57), new(0UL, 59), new(0UL, 59),
         new(0UL, 59), new(0UL, 59), new(0UL, 59), new(0UL, 59), new(0UL, 59), new(0UL, 59), new(0UL, 59), new(0UL, 59),
-        new(0UL, 58), new(0UL, 59), new(0UL, 59), new(0UL, 59), new(0UL, 59), new(0UL, 59), new(0UL, 59), new(0UL, 58),
-    };
+        new(0UL, 58), new(0UL, 59), new(0UL, 59), new(0UL, 59), new(0UL, 59), new(0UL, 59), new(0UL, 59), new(0UL, 58)
+    ];
 }
 

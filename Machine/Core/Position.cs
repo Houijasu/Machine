@@ -186,6 +186,44 @@ public sealed class Position
         _zobristKey = key;
     }
 
+#if DEBUG
+        public ulong ComputeZobristFromScratch()
+        {
+            ulong key = 0;
+            for (Color color = Color.White; color <= Color.Black; color++)
+            {
+                for (PieceType pieceType = PieceType.Pawn; pieceType <= PieceType.King; pieceType++)
+                {
+                    int idx = PieceIndex(color, pieceType);
+                    ulong bb = PieceBB[idx];
+                    while (bb != 0)
+                    {
+                        int sq = Bitboards.Lsb(bb);
+                        bb &= bb - 1;
+                        key ^= Zobrist.PieceSquare[idx, sq];
+                    }
+                }
+            }
+            if (EnPassantSquare != -1) key ^= Zobrist.EnPassantFile[EnPassantSquare % 8];
+            key ^= Zobrist.Castle[(int)Castling];
+            if (SideToMove == Color.Black) key ^= Zobrist.SideToMove;
+            return key;
+        }
+
+        public bool VerifyZobrist(out string message)
+        {
+            ulong recomputed = ComputeZobristFromScratch();
+            if (recomputed != _zobristKey)
+            {
+                message = $"zobrist mismatch: inc={_zobristKey} rec={recomputed} castling={Castling} ep={EnPassantSquare} stm={SideToMove}";
+                return false;
+            }
+            message = string.Empty;
+            return true;
+        }
+#endif
+
+
 
     public static int PieceIndex(Color c, PieceType pt)
     {
@@ -253,7 +291,7 @@ public sealed class Position
             HalfMoveClock = HalfmoveClock,
             FullMoveNumber = FullmoveNumber,
             Captured = PieceType.None,
-            Hash = 0UL,
+            Hash = _zobristKey,
             CapturedSquare = -1
         };
 
@@ -366,6 +404,16 @@ public sealed class Position
         }
         // If rook got captured on corner, update opponent rights
         if (u.Captured == PieceType.Rook)
+#if DEBUG
+            if (Machine.Search.SearchEngine.DebugEnabled)
+            {
+                if (!VerifyZobrist(out var msg))
+                {
+                    System.Diagnostics.Debug.WriteLine($"[ApplyMove] {msg}");
+                }
+            }
+#endif
+
         {
             if (them == Color.White)
             {
@@ -379,15 +427,19 @@ public sealed class Position
             }
         }
 
-        // EP square update
+        // EP square update candidate for next move
+        int newEp = -1;
         if (pt == PieceType.Pawn && m.Flag == MoveFlag.DoublePush)
         {
-            EnPassantSquare = us == Color.White ? (from + 8) : (from - 8);
+            newEp = us == Color.White ? (from + 8) : (from - 8);
             HalfmoveClock = 0;
         }
         else
         {
-        // Consolidated Zobrist updates at end
+            if (pt == PieceType.Pawn) HalfmoveClock = 0; else HalfmoveClock++;
+        }
+
+        // Consolidated Zobrist updates at end (always execute)
         // 1) Toggle side to move
         _zobristKey ^= Zobrist.SideToMove;
         // 2) Castling rights change
@@ -396,13 +448,11 @@ public sealed class Position
             _zobristKey ^= Zobrist.Castle[(int)u.Castling];
             _zobristKey ^= Zobrist.Castle[(int)Castling];
         }
-        // 3) En passant changes
+        // 3) En passant changes: clear old, set new
         if (u.EnPassant != -1) _zobristKey ^= Zobrist.EnPassantFile[u.EnPassant % 8];
-        if (EnPassantSquare != -1) _zobristKey ^= Zobrist.EnPassantFile[EnPassantSquare % 8];
+        if (newEp != -1) _zobristKey ^= Zobrist.EnPassantFile[newEp % 8];
 
-            EnPassantSquare = -1;
-            if (pt == PieceType.Pawn) HalfmoveClock = 0; else HalfmoveClock++;
-        }
+        EnPassantSquare = newEp;
 
         // Fullmove number and side
         if (us == Color.Black) FullmoveNumber++;
@@ -493,19 +543,25 @@ public sealed class Position
             AddPiece(SideToMove, u.Captured, u.CapturedSquare);
         }
 
-        // Restore state
+        // Capture current (post-move) state for Zobrist reversal
+        var newCastle = Castling;
+        var newEp = EnPassantSquare;
+
+        // Restore state fields
         Castling = u.Castling;
         EnPassantSquare = u.EnPassant;
         HalfmoveClock = u.HalfMoveClock;
         FullmoveNumber = u.FullMoveNumber;
         SideToMove = us; // it's now our turn again
 
-            // Undo zobrist changes matching restored state
-            _zobristKey ^= Zobrist.SideToMove; // toggle back
-            _zobristKey ^= Zobrist.Castle[(int)Castling];
-            _zobristKey ^= Zobrist.Castle[(int)u.Castling];
-            if (EnPassantSquare != -1) _zobristKey ^= Zobrist.EnPassantFile[EnPassantSquare % 8];
-            if (u.EnPassant != -1) _zobristKey ^= Zobrist.EnPassantFile[u.EnPassant % 8];
+        // Undo Zobrist changes matching restored state
+        _zobristKey ^= Zobrist.SideToMove; // toggle back
+        // Castling: remove new, add old
+        _zobristKey ^= Zobrist.Castle[(int)newCastle];
+        _zobristKey ^= Zobrist.Castle[(int)u.Castling];
+        // En passant: remove new, add old
+        if (newEp != -1) _zobristKey ^= Zobrist.EnPassantFile[newEp % 8];
+        if (u.EnPassant != -1) _zobristKey ^= Zobrist.EnPassantFile[u.EnPassant % 8];
 
             if (CheckZobristOnUndo)
             {
@@ -580,6 +636,8 @@ public sealed class Position
         clone.EnPassantSquare = EnPassantSquare;
         clone.HalfmoveClock = HalfmoveClock;
         clone.FullmoveNumber = FullmoveNumber;
+        // Preserve Zobrist so TT probes and repetition checks remain valid
+        clone._zobristKey = _zobristKey;
         return clone;
     }
 
