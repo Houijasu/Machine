@@ -1,0 +1,42 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <LangVersion>preview</LangVersion>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <PackageReference Include="BenchmarkDotNet" Version="0.15.2" />
+      <PackageReference Include="BenchmarkDotNet.Core" Version="0.10.14" />
+      <PackageReference Include="BenchmarkDotNet.Diagnostics.dotMemory" Version="0.15.2" />
+      <PackageReference Include="BenchmarkDotNet.Diagnostics.dotTrace" Version="0.15.2" />
+      <PackageReference Include="BenchmarkDotNet.Diagnostics.Windows" Version="0.15.2" />
+      <PackageReference Include="BenchmarkDotNet.TestAdapter" Version="0.15.2" />
+      <PackageReference Include="BenchmarkDotNet.Toolchains.Roslyn" Version="0.10.14" />
+      <PackageReference Include="Dunet" Version="1.11.3" />
+      <PackageReference Include="Microsoft.ML" Version="5.0.0-preview.25373.1" />
+      <PackageReference Include="Microsoft.ML.CodeGenerator" Version="0.23.0-preview.25373.1" />
+      <PackageReference Include="Microsoft.ML.EntryPoints" Version="0.23.0-preview.25373.1" />
+      <PackageReference Include="Microsoft.ML.Experimental" Version="0.23.0-preview.25373.1" />
+      <PackageReference Include="Microsoft.ML.Fairlearn" Version="0.23.0-preview.25373.1" />
+      <PackageReference Include="Microsoft.ML.Featurizers" Version="0.20.0-preview.22313.1" />
+      <PackageReference Include="Microsoft.ML.LightGbm" Version="5.0.0-preview.25373.1" />
+      <PackageReference Include="Microsoft.ML.Probabilistic" Version="0.4.2504.701" />
+      <PackageReference Include="Microsoft.ML.Scoring" Version="1.2.0" />
+      <PackageReference Include="Microsoft.ML.Tokenizers" Version="2.0.0-preview.25373.1" />
+      <PackageReference Include="Microsoft.MLFeaturizers" Version="0.4.1" />
+      <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+      <PackageReference Include="Spectre.Console" Version="0.50.1-preview.0.26" />
+      <PackageReference Include="Spectre.Console.Cli" Version="0.50.1-preview.0.21" />
+      <PackageReference Include="TUnit" Version="0.57.24" />
+      <PackageReference Include="TUnit.Core" Version="0.57.24" />
+      <PackageReference Include="TUnit.TestAdapter" Version="0.1.252-alpha01">
+        <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        <PrivateAssets>all</PrivateAssets>
+      </PackageReference>
+    </ItemGroup>
+
+</Project>
