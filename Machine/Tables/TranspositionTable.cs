@@ -24,7 +24,7 @@ public struct TTEntry
     public bool IsValid => Flag != TTFlag.None;
 }
 
-public sealed class TranspositionTable
+public sealed class TranspositionTable : ITranspositionTable
 {
     private const int BucketSize = 4;
     private const int MaxAge = 63;
@@ -143,17 +143,19 @@ public sealed class TranspositionTable
     
     public int GetHashFull()
     {
-        // Sample the first 1000 entries to estimate hash fullness
-        int sampleSize = Math.Min(1000, _entries.Length);
+        // Randomized sampling across the table to estimate fullness
+        const int sampleSize = 1000;
         int filledCount = 0;
-        
+        int totalEntries = _entries.Length;
+        if (totalEntries == 0) return 0;
+        var random = new Random(unchecked((int)DateTime.UtcNow.Ticks));
         for (int i = 0; i < sampleSize; i++)
         {
-            if (_entries[i].IsValid)
+            int index = random.Next(totalEntries);
+            if (_entries[index].IsValid)
                 filledCount++;
         }
-        
-        return (filledCount * 1000) / sampleSize; // Return per-mille
+        return (filledCount * 1000) / sampleSize; // per-mille
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

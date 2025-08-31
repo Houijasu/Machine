@@ -13,5 +13,22 @@ public static class Bitboards
     public static int PopCount(ulong bb) => BitOperations.PopCount(bb);
     public static int Lsb(ulong bb) => bb == 0 ? -1 : (int)BitOperations.TrailingZeroCount(bb);
     public static int Msb(ulong bb) => bb == 0 ? -1 : 63 - (int)BitOperations.LeadingZeroCount(bb);
+
+    private static readonly ulong[] _fileMasks = BuildFileMasks();
+    
+    private static ulong[] BuildFileMasks()
+    {
+        var arr = new ulong[8];
+        ulong f = FileA;
+        for (int i = 0; i < 8; i++) { arr[i] = f << i; }
+        return arr;
+    }
+    
+    public static ulong FileMask(int file)
+    {
+        if ((uint)file >= 8) return 0UL;
+        return _fileMasks[file];
+    }
 }
+
 

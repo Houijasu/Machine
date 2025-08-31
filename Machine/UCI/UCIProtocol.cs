@@ -12,7 +12,7 @@ public sealed class UCIProtocol
     private readonly TextWriter _out;
     private readonly Position _position = new();
     private bool _positionInitialized = false;
-    private readonly SearchEngine _searchEngine = new();
+    private readonly SearchEngine _searchEngine = new(16, true); // Use atomic TT by default for SMP
     private bool _pondering;
 
     public string EngineName { get; init; } = "Machine";
@@ -38,10 +38,35 @@ public sealed class UCIProtocol
             {
                 Send($"id name {EngineName}");
                 Send($"id author {EngineAuthor}");
-                Send("option name Hash type spin default 16 min 1 max 32768");
-                Send("option name Threads type spin default 1 min 1 max 512");
-                Send("option name UseNUMA type check default false");
-                Send("option name HelperThreads type spin default 0 min 0 max 64");
+                
+                // Core engine settings
+                Send("option name Hash type spin default 16 min 1 max 32768");  // Transposition table size in MB
+                Send("option name Threads type spin default 1 min 1 max 512");  // Number of search threads
+                
+                // Search enhancements
+                Send("option name NullMove type check default true");          // Enable null move pruning
+                Send("option name Futility type check default true");          // Enable futility pruning at shallow depths
+                Send("option name Aspiration type check default true");        // Enable aspiration windows
+                Send("option name Razoring type check default true");          // Enable razoring at shallow depths
+                Send("option name Extensions type check default true");        // Enable check extensions
+                Send("option name ProbCut type check default true");           // Enable probabilistic cut
+                Send("option name SingularExtensions type check default true"); // Extend singular moves
+                
+                // Move ordering
+                Send("option name SEEPruning type check default true");        // Use SEE for move ordering
+                Send("option name SEEThreshold type spin default 0 min -500 max 500"); // SEE pruning threshold
+                
+                // Evaluation features
+                Send("option name Eval type check default true");              // Enable position evaluation
+                Send("option name PST type check default true");               // Use piece-square tables
+                Send("option name PawnStructure type check default true");     // Evaluate pawn structure
+                Send("option name KingSafety type check default true");        // Evaluate king safety
+                
+                // Debug and analysis
+                Send("option name DebugInfo type check default false");        // Show pruning statistics
+                Send("option name UseNUMA type check default false");          // NUMA optimization (unused)
+                Send("option name HelperThreads type spin default 0 min 0 max 64"); // Extra helper threads (unused)
+                
                 Send("uciok");
             }
             else if (line == "isready")
@@ -186,19 +211,81 @@ public sealed class UCIProtocol
         }
         if (name.Length == 0) return;
         _options[name] = value ?? string.Empty;
-        
+
         // Handle engine options
-        if (name.Equals("Hash", StringComparison.OrdinalIgnoreCase) && 
-            value != null && int.TryParse(value, out var hashSize))
+        if (name.Equals("Hash", StringComparison.OrdinalIgnoreCase) && value != null && int.TryParse(value, out var hashSize))
         {
             _searchEngine.ResizeHash(hashSize);
+        }
+        else if (name.Equals("Eval", StringComparison.OrdinalIgnoreCase) && value != null)
+        {
+            if (bool.TryParse(value, out var b)) Evaluation.SetOptions(b, Evaluation.UsePST, Evaluation.UsePawnStructure, Evaluation.UseKingSafety);
+        }
+        else if (name.Equals("PST", StringComparison.OrdinalIgnoreCase) && value != null)
+        {
+            if (bool.TryParse(value, out var b)) Evaluation.SetOptions(Evaluation.UseEvaluation, b, Evaluation.UsePawnStructure, Evaluation.UseKingSafety);
+        }
+        else if (name.Equals("PawnStructure", StringComparison.OrdinalIgnoreCase) && value != null)
+        {
+            if (bool.TryParse(value, out var b)) Evaluation.SetOptions(Evaluation.UseEvaluation, Evaluation.UsePST, b, Evaluation.UseKingSafety);
+        }
+        else if (name.Equals("KingSafety", StringComparison.OrdinalIgnoreCase) && value != null)
+        {
+            if (bool.TryParse(value, out var b)) Evaluation.SetOptions(Evaluation.UseEvaluation, Evaluation.UsePST, Evaluation.UsePawnStructure, b);
+        }
+        else if (name.Equals("SingularExtensions", StringComparison.OrdinalIgnoreCase) && value != null)
+        {
+            if (bool.TryParse(value, out var b)) _searchEngine.SetFeature(nameof(_searchEngine.UseSingularExtensions), b);
+        }
+        else if (name.Equals("DebugInfo", StringComparison.OrdinalIgnoreCase) && value != null)
+        {
+            if (bool.TryParse(value, out var b)) _searchEngine.EnableDebugInfo = b;
+        }
+        else if (name.Equals("Extensions", StringComparison.OrdinalIgnoreCase) && value != null)
+        {
+            if (bool.TryParse(value, out var b)) _searchEngine.SetFeature(nameof(_searchEngine.UseExtensions), b);
+        }
+        else if (name.Equals("NullMove", StringComparison.OrdinalIgnoreCase) && value != null)
+        {
+            if (bool.TryParse(value, out var b)) _searchEngine.SetFeature(nameof(_searchEngine.UseNullMove), b);
+        }
+        else if (name.Equals("SEEThreshold", StringComparison.OrdinalIgnoreCase) && value != null && int.TryParse(value, out var thr))
+        {
+            MoveOrdering.SetSEEThreshold(thr);
+        }
+        else if (name.Equals("Futility", StringComparison.OrdinalIgnoreCase) && value != null)
+        {
+            if (bool.TryParse(value, out var b)) _searchEngine.SetFeature(nameof(_searchEngine.UseFutility), b);
+        }
+        else if (name.Equals("Aspiration", StringComparison.OrdinalIgnoreCase) && value != null)
+        {
+            if (bool.TryParse(value, out var b)) _searchEngine.SetFeature(nameof(_searchEngine.UseAspiration), b);
+        }
+        else if (name.Equals("SEEPruning", StringComparison.OrdinalIgnoreCase) && value != null)
+        {
+            if (bool.TryParse(value, out var b)) MoveOrdering.SetSEEPruning(b);
+        }
+        else if (name.Equals("Razoring", StringComparison.OrdinalIgnoreCase) && value != null)
+        {
+            if (bool.TryParse(value, out var b)) _searchEngine.SetFeature(nameof(_searchEngine.UseRazoring), b);
+        }
+        else if (name.Equals("Extensions", StringComparison.OrdinalIgnoreCase) && value != null)
+        {
+            if (bool.TryParse(value, out var b)) _searchEngine.SetFeature(nameof(_searchEngine.UseExtensions), b);
+        }
+        else if (name.Equals("ProbCut", StringComparison.OrdinalIgnoreCase) && value != null)
+        {
+            if (bool.TryParse(value, out var b)) _searchEngine.SetFeature(nameof(_searchEngine.UseProbCut), b);
+        }
+        else if (name.Equals("SingularExtensions", StringComparison.OrdinalIgnoreCase) && value != null)
+        {
+            if (bool.TryParse(value, out var b)) _searchEngine.SetFeature(nameof(_searchEngine.UseSingularExtensions), b);
         }
         else if (name.Equals("Threads", StringComparison.OrdinalIgnoreCase) &&
                  value != null && int.TryParse(value, out var threadCount))
         {
-            // Store thread count for future SMP implementation
-            // For now, just acknowledge the setting without error
-            Send($"info string threads set to {Math.Clamp(threadCount, 1, 512)}");
+            _searchEngine.SetThreads(threadCount);
+            Send($"info string threads set to {threadCount}");
         }
     }
 
@@ -244,12 +331,12 @@ public sealed class UCIProtocol
             {
                 int myTime = _position.SideToMove == Color.White ? (wtime ?? 0) : (btime ?? 0);
                 int myInc  = _position.SideToMove == Color.White ? (winc ?? 0)  : (binc ?? 0);
-                
+
                 // Enhanced overhead calculation - more conservative for low time
                 int overhead = myTime < 10000 ? 100 : 50; // Higher overhead for time trouble
                 int emergencyReserve = Math.Min(1000, myTime / 10); // Keep 10% in reserve
                 int availableTime = Math.Max(0, myTime - emergencyReserve);
-                
+
                 int alloc;
                 if (movestogo.HasValue && movestogo.Value > 0)
                 {
@@ -260,13 +347,13 @@ public sealed class UCIProtocol
                 {
                     // Sudden death or increment - scale allocation based on time remaining
                     double timePercent = myTime > 60000 ? 0.03 :  // >1 minute: 3%
-                                        myTime > 30000 ? 0.04 :  // 30s-1m: 4% 
+                                        myTime > 30000 ? 0.04 :  // 30s-1m: 4%
                                         myTime > 10000 ? 0.05 :  // 10-30s: 5%
                                                         0.08;    // <10s: 8% (faster decisions)
-                    
+
                     alloc = (int)(availableTime * timePercent) + myInc - overhead;
                 }
-                
+
                 // Safety bounds - never use more than 1/3 of remaining time
                 int maxAlloc = Math.Max(100, availableTime / 3);
                 alloc = Math.Clamp(alloc, 50, maxAlloc);
@@ -279,6 +366,7 @@ public sealed class UCIProtocol
             }
         }
 
+        // Emergency stop guard: store for engine ShouldStop check (soft/hard caps)
         limits.StartTime = DateTime.UtcNow;
         _pondering = ponder;
 
@@ -290,7 +378,7 @@ public sealed class UCIProtocol
                 _position.SetStartPosition();
                 _positionInitialized = true;
             }
-            
+
             _searchEngine.SetPosition(_position);
             var result = _searchEngine.Search(limits);
 
