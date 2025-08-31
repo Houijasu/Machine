@@ -12,7 +12,7 @@ public sealed class UCIProtocol
     private readonly TextWriter _out;
     private readonly Position _position = new();
     private bool _positionInitialized = false;
-    private readonly SearchEngine _searchEngine = new(16, true); // Use atomic TT by default for SMP
+    private SearchEngine _searchEngine = new(16);
     private bool _pondering;
 
     public string EngineName { get; init; } = "Machine";
@@ -59,16 +59,22 @@ public sealed class UCIProtocol
                 // Evaluation features
                 Send("option name Eval type check default true");              // Enable position evaluation
                 Send("option name DebugInfo type check default false");
+                Send("option name TTInfo type check default true");
+                Send("option name LazySMP_AspirationDelta type spin default 25 min 0 max 400");
+                Send("option name LazySMP_DepthSkipping type check default true");
+                Send("option name LazySMP_NullMoveVariation type check default true");
+                Send("option name LazySMP_ShowInfo type check default false");  // Show threads_active and currmove
+                Send("option name LazySMP_ShowMetrics type check default false"); // Show duplication/balance metrics
+
+
                 Send("option name VerboseDebug type check default false");
                 Send("option name PST type check default true");               // Use piece-square tables
                 Send("option name PawnStructure type check default true");     // Evaluate pawn structure
                 Send("option name KingSafety type check default true");        // Evaluate king safety
 
                 // Debug and analysis
-                Send("option name DebugInfo type check default false");        // Show pruning statistics
                 Send("option name UseNUMA type check default false");          // NUMA optimization (unused)
                 Send("option name HelperThreads type spin default 0 min 0 max 64"); // Extra helper threads (unused)
-
                 Send("uciok");
             }
             else if (line == "isready")
@@ -293,6 +299,30 @@ public sealed class UCIProtocol
             _searchEngine.SetThreads(threadCount);
             Send($"info string threads set to {threadCount}");
         }
+        else if (name.Equals("LazySMP_AspirationDelta", StringComparison.OrdinalIgnoreCase) && value != null && int.TryParse(value, out var lad))
+        {
+            _searchEngine.SetLazyAspirationDelta(lad);
+            Send($"info string LazySMP_AspirationDelta set to {lad}");
+        }
+        else if (name.Equals("LazySMP_DepthSkipping", StringComparison.OrdinalIgnoreCase) && value != null && bool.TryParse(value, out var lds))
+        {
+            _searchEngine.SetLazyDepthSkipping(lds);
+            Send($"info string LazySMP_DepthSkipping set to {lds}");
+        }
+        else if (name.Equals("LazySMP_NullMoveVariation", StringComparison.OrdinalIgnoreCase) && value != null && bool.TryParse(value, out var lnm))
+        {
+            _searchEngine.SetLazyNullMoveVariation(lnm);
+            Send($"info string LazySMP_NullMoveVariation set to {lnm}");
+        }
+        else if (name.Equals("LazySMP_ShowInfo", StringComparison.OrdinalIgnoreCase) && value != null && bool.TryParse(value, out var lsi))
+        {
+            _searchEngine.SetLazyShowInfo(lsi);
+        }
+        else if (name.Equals("LazySMP_ShowMetrics", StringComparison.OrdinalIgnoreCase) && value != null && bool.TryParse(value, out var lsm))
+        {
+            _searchEngine.SetLazyShowMetrics(lsm);
+        }
+        // Removed CompactTT and TTVariant options - CompactTT is now the only implementation
     }
 
     private void HandleGo(string line)
@@ -331,7 +361,7 @@ public sealed class UCIProtocol
         }
 
         // Enhanced time management if no explicit movetime/nodes/depth was provided
-        if (!limits.Infinite && limits.TimeLimit is null && limits.NodeLimit is null && limits.MaxDepth == 64)
+        if (limits is { Infinite: false, TimeLimit: null, NodeLimit: null, MaxDepth: 64 })
         {
             if (wtime.HasValue || btime.HasValue)
             {
@@ -344,7 +374,7 @@ public sealed class UCIProtocol
                 int availableTime = Math.Max(0, myTime - emergencyReserve);
 
                 int alloc;
-                if (movestogo.HasValue && movestogo.Value > 0)
+                if (movestogo is > 0)
                 {
                     // Tournament time control - divide remaining time by moves to go
                     alloc = availableTime / Math.Max(1, movestogo.Value + 2) + myInc - overhead;
@@ -360,7 +390,7 @@ public sealed class UCIProtocol
                     alloc = (int)(availableTime * timePercent) + myInc - overhead;
                 }
 
-                // Safety bounds - never use more than 1/3 of remaining time
+                // Safety bounds - never use more than 1/3 of the remaining time
                 int maxAlloc = Math.Max(100, availableTime / 3);
                 alloc = Math.Clamp(alloc, 50, maxAlloc);
                 limits.TimeLimit = TimeSpan.FromMilliseconds(alloc);
@@ -373,6 +403,15 @@ public sealed class UCIProtocol
         }
 
         // Emergency stop guard: store for engine ShouldStop check (soft/hard caps)
+
+        // TT stats (if enabled)
+        if (!_options.TryGetValue("TTInfo", out var ttInfo) || bool.TryParse(ttInfo, out var ttEnabled) && ttEnabled)
+        {
+            var (probes, hits, rate) = _searchEngine.GetTTStats();
+            int hashfull = _searchEngine.GetTranspositionTable().GetHashFull();
+            Send($"info string tt_hitrate {rate:F2} tt_hashfull {hashfull}");
+        }
+
         limits.StartTime = DateTime.UtcNow;
         _pondering = ponder;
 

@@ -130,7 +130,7 @@ public sealed class Position
                 rank--; file = 0;
                 continue;
             }
-            if (ch >= '1' && ch <= '8')
+            if (ch is >= '1' and <= '8')
             {
                 file += ch - '0';
                 continue;
@@ -304,7 +304,7 @@ public sealed class Position
         RemovePiece(us, pt, from);
 
         // Captures (normal)
-        if ((m.Flag == MoveFlag.Capture) || (m.Flag >= MoveFlag.PromoCaptureKnight && m.Flag <= MoveFlag.PromoCaptureQueen))
+        if ((m.Flag == MoveFlag.Capture) || m.Flag is >= MoveFlag.PromoCaptureKnight and <= MoveFlag.PromoCaptureQueen)
         {
             // EP handled separately
             if (PieceAt(to, out var capColor, out var capType))

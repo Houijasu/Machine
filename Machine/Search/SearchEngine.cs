@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 using System.Threading;
@@ -14,7 +13,7 @@ namespace Machine.Search;
 
 public sealed class SearchEngine
 {
-    private readonly ITranspositionTable _tt;
+    private ITranspositionTable _tt;
     private Position _position;
     private volatile bool _stopRequested;
     private SearchLimits? _limits;
@@ -23,18 +22,13 @@ public sealed class SearchEngine
     // Threading
     private int _threadCount = 1;
     // Root-split infrastructure
-    private ConcurrentQueue<(Move move, int moveIndex)>? _rootMoveQueue;
-    private ConcurrentDictionary<int, int>? _rootMoveScores;
-    private Move[]? _rootMoves;
-    private volatile bool _useRootSplit;
-    private bool _rootSplitEnabled = true;
 
-    private bool _lastUsedRootSplit;
 
-    public void SetRootSplit(bool enabled) => _rootSplitEnabled = enabled;
 
-    private readonly List<Thread> _helperThreads = [];
     private readonly PVTable _pvTable = new();
+
+        // Thread-local search state for main thread
+        private ThreadLocalSearchState? _mainState;
 
     // atomic counters for SMP
     private ulong _nodesSearched;
@@ -84,20 +78,64 @@ public sealed class SearchEngine
 
     public ulong NodesSearched { get; private set; }
     public ulong QNodesSearched { get; private set; }
+
+	    // LazySMP options
+	    private int _lazyAspirationDelta = 25;
+	    private bool _lazyDepthSkipping = true;
+	    private bool _lazyNullMoveVariation = true;
+	    private bool _lazyShowInfo = false;
+	    private bool _lazyShowMetrics = false;
+	    public void SetLazyAspirationDelta(int delta) => _lazyAspirationDelta = Math.Max(0, delta);
+	    public void SetLazyDepthSkipping(bool enabled) => _lazyDepthSkipping = enabled;
+	    public void SetLazyNullMoveVariation(bool enabled) => _lazyNullMoveVariation = enabled;
+	    public void SetLazyShowInfo(bool enabled) => _lazyShowInfo = enabled;
+	    public void SetLazyShowMetrics(bool enabled) => _lazyShowMetrics = enabled;
+
     public int SelectiveDepth { get; private set; }
 
-    public SearchEngine(int hashSizeMb = 16, bool useAtomicTT = false)
+    public SearchEngine(int hashSizeMb = 16)
     {
-        _tt = useAtomicTT ? new AtomicTranspositionTable(hashSizeMb) : new TranspositionTable(hashSizeMb);
+        _tt = new TranspositionTable(hashSizeMb);
         _currentHashSize = hashSizeMb;
         _position = new Position();
         _instance = this; // publish for debug-only helpers
+    }
+
+    // internal worker ctor sharing TT
+    internal SearchEngine(ITranspositionTable tt)
+    {
+        _tt = tt;
+        _currentHashSize = 16;
+        _position = new Position();
+        _instance = this;
     }
 
     public void SetPosition(Position position)
     {
         _position = position;
     }
+
+
+	    public ITranspositionTable GetTranspositionTable() => _tt;
+/*
+	    public (long probes, long hits, double hitRate) GetTTStats()
+	    {
+	        var stats = _tt.GetStats();
+	        // Using reflection-safe layout: fields exposed in TTStats
+	        var ttStatsType = stats.GetType();
+	        long probes = (long)ttStatsType.GetField("Probes")!.GetValue(stats)!;
+	        long hits = (long)ttStatsType.GetField("Hits")!.GetValue(stats)!;
+	        double rate = probes > 0 ? (double)hits / probes : 0.0;
+	        return (probes, hits, rate);
+	    }
+*/
+
+	    public (long probes, long hits, double hitRate) GetTTStats()
+	    {
+	        var s = _tt.GetStats();
+	        return (s.Probes, s.Hits, s.HitRate);
+	    }
+
 
     public void Stop()
     {
@@ -148,6 +186,12 @@ public sealed class SearchEngine
 
     public SearchResult Search(SearchLimits limits)
     {
+
+	        // Initialize thread-local state for main thread
+	        _mainState ??= new ThreadLocalSearchState(0);
+	        _mainState.Clear();
+	        MoveOrdering.SetThreadState(_mainState);
+
         _limits = limits;
         _stopRequested = false;
         var sw = Stopwatch.StartNew();
@@ -163,20 +207,15 @@ public sealed class SearchEngine
 
         try
         {
-                // Launch helper threads for LazySMP if requested
-                if (_threadCount > 1 && _helperThreads.Count == 0)
-                {
-                    for (int i = 1; i < _threadCount; i++)
-                    {
-                        var helperPos = _position.Clone();
-                        int threadIdx = i; // use thread index for diversification
-                        var thread = new Thread(() => HelperThreadLoop(helperPos, limits, threadIdx)) { IsBackground = true };
-                        _helperThreads.Add(thread);
-                        thread.Start();
-                    }
-                }
+            // For multi-threaded runs, delegate to LazySMPEngine (pure LazySMP)
+            if (_threadCount > 1)
+            {
+                var lazy = new LazySMPEngine(_threadCount, _tt, _lazyAspirationDelta, _lazyDepthSkipping, _lazyNullMoveVariation, _lazyShowInfo, _lazyShowMetrics);
+                var lazyResult = lazy.Search(_position, limits);
+                return lazyResult;
+            }
 
-            // Iterative deepening framework
+            // Iterative deepening framework (single-thread)
             for (int depth = 1; depth <= limits.MaxDepth && !ShouldStop(); depth++)
             {
                 var iterResult = SearchAtDepth(depth);
@@ -222,26 +261,19 @@ public sealed class SearchEngine
     }
 
 
-    private SearchResult SearchAtDepth(int depth, int threadIdx = 0)
+    private SearchResult SearchAtDepth(int depth)
 
     {
         const int alpha = -30000;
         const int beta = 30000;
 
-        // Enable root-split from the main thread only
-        _lastUsedRootSplit = false;
-        if (_rootSplitEnabled && depth >= 2 && _threadCount > 1 && threadIdx == 0)
-        {
-            _lastUsedRootSplit = true;
-            return SearchAtDepthRootSplit(depth);
-        }
 
         var result = new SearchResult { Depth = depth };
 
         int windowAlpha = alpha;
         int windowBeta = beta;
 
-        // Root aspiration windows around lastScore
+        // Aspiration windows around lastScore
         if (UseAspiration && _lastScore != int.MinValue && depth >= 4)
         {
             int delta = 40; // 40cp initial half-window
@@ -249,19 +281,14 @@ public sealed class SearchEngine
             windowBeta = Math.Min(beta, _lastScore + delta);
         }
 
-        // Light diversification for helpers remains
-        if (depth > 3 && threadIdx > 0)
-        {
-            int aspirationOffset = threadIdx * 50;
-            if ((threadIdx & 1) == 1) windowBeta = Math.Min(beta, windowBeta + aspirationOffset);
-            else windowAlpha = Math.Max(alpha, windowAlpha - aspirationOffset);
-        }
 
         int score;
         while (true)
         {
-            _pvTable.Clear();
-            score = AlphaBeta.Search(_position, depth, windowAlpha, windowBeta, this, _tt, 0, true, _pvTable);
+            // Use main thread-local PV if available; fallback to shared PVTable
+            var pvTable = _mainState?.PV ?? _pvTable;
+            pvTable.Clear();
+            score = AlphaBeta.Search(_position, depth, windowAlpha, windowBeta, this, _tt, 0, true, pvTable, null, 0);
 
             if (score <= windowAlpha)
             {
@@ -283,82 +310,18 @@ public sealed class SearchEngine
         if (!_stopRequested)
         {
             result.Score = score;
-        // Rebuild PV if root-split was used
-            _lastUsedRootSplit = true;
-
-        if (_lastUsedRootSplit)
-        {
             var clone = _position.Clone();
             var pvMoves = BuildPV(clone, 32);
-            _pvTable.Clear();
-            for (int i = 0; i < pvMoves.Length; i++) _pvTable.Set(0, i, pvMoves[i]);
-        }
+            var pvTable = _mainState?.PV ?? _pvTable;
+            pvTable.Clear();
+            for (int i = 0; i < pvMoves.Length; i++) pvTable.Set(0, i, pvMoves[i]);
 
-            result.BestMove = _pvTable.GetBestMove();
+            result.BestMove = (_mainState?.PV ?? _pvTable).GetBestMove();
             if (result.BestMove.Equals(Move.NullMove))
                 result.BestMove = _tt.GetBestMove(_position);
         }
 
         return result;
-    }
-    private SearchResult SearchAtDepthRootSplit(int depth)
-    {
-        // Generate root moves once
-        Span<Move> moveBuffer = stackalloc Move[256];
-        int moveCount = MoveGenerator.GenerateMoves(_position, moveBuffer);
-
-        _rootMoves = new Move[moveCount];
-        _rootMoveQueue = new ConcurrentQueue<(Move move, int moveIndex)>();
-        _rootMoveScores = new ConcurrentDictionary<int, int>();
-
-        int legalCount = 0;
-        for (int i = 0; i < moveCount; i++)
-        {
-            var move = moveBuffer[i];
-            _position.ApplyMove(move);
-            Color moved = _position.SideToMove == Color.White ? Color.Black : Color.White;
-            bool legal = !_position.IsKingInCheck(moved);
-            _position.UndoMove(move);
-
-            if (legal)
-            {
-                _rootMoves[legalCount] = move;
-                _rootMoveQueue.Enqueue((move, legalCount));
-                legalCount++;
-            }
-        }
-
-        // Signal helpers root-split is active and queue is ready
-        _useRootSplit = true;
-
-        // Wait for helpers to process queue
-        while (_rootMoveQueue.Count > 0 && !ShouldStop())
-            Thread.Sleep(1);
-
-        // Aggregate results
-        Move bestMove = Move.NullMove;
-        int bestScore = -30000;
-        foreach (var kvp in _rootMoveScores)
-        {
-            if (kvp.Value > bestScore)
-            {
-                bestScore = kvp.Value;
-                bestMove = _rootMoves[kvp.Key];
-            }
-        }
-
-        // Done with root-split for this depth
-        _useRootSplit = false;
-
-        // Store best in TT for PV
-        _tt.Store(_position, bestMove, bestScore, depth, TTFlag.Exact);
-
-        return new SearchResult
-        {
-            BestMove = bestMove,
-            Score = bestScore,
-            Depth = depth
-        };
     }
 
 
@@ -454,46 +417,6 @@ public sealed class SearchEngine
         return false;
     }
 
-    private void HelperThreadLoop(Position pos, SearchLimits limits, int threadIdx)
-    {
-        try
-        {
-            int startDepth = threadIdx > 4 ? 2 : 1; // skip very shallow for some helpers
-            for (int depth = startDepth; depth <= limits.MaxDepth && !ShouldStop(); depth++)
-            {
-                // Root-split: process queued root moves when active
-                if (_useRootSplit && _rootMoveQueue != null && _rootMoveScores != null)
-                {
-                    while (_rootMoveQueue.TryDequeue(out var task) && !ShouldStop())
-                    {
-                        pos.ApplyMove(task.move);
-                        int score = -AlphaBeta.Search(pos, depth - 1, -30000, 30000, this, _tt, 1, true, null);
-                        pos.UndoMove(task.move);
-                        _rootMoveScores.AddOrUpdate(task.moveIndex, score, (key, oldValue) => Math.Max(oldValue, score));
-                    }
-                    // Wait until root-split deactivates or more tasks appear
-                    while (_useRootSplit && !ShouldStop() && (_rootMoveQueue == null || _rootMoveQueue.IsEmpty))
-                        Thread.Sleep(1);
-                }
-                else
-                {
-                    int alpha = -30000, beta = 30000;
-
-                    if (depth > 3)
-                    {
-                        int aspirationOffset = threadIdx * 75;
-                        if ((threadIdx & 1) == 1) beta = Math.Min(30000, beta + aspirationOffset);
-                        else alpha = Math.Max(-30000, alpha - aspirationOffset);
-                    }
-                    AlphaBeta.Search(pos, depth, alpha, beta, this, _tt, 0, true, null);
-                }
-            }
-        }
-        catch
-        {
-            // Swallow exceptions in helpers to avoid crashing main thread
-        }
-    }
 
 
 

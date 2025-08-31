@@ -119,7 +119,7 @@ public static class Quiescence
     
     private static bool IsPromotion(Move move)
     {
-        return move.Flag >= MoveFlag.PromoQueen && move.Flag <= MoveFlag.PromoCaptureKnight;
+        return move.Flag is >= MoveFlag.PromoQueen and <= MoveFlag.PromoCaptureKnight;
     }
     
     private static int Evaluate(Position pos)

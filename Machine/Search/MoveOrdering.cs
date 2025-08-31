@@ -7,6 +7,11 @@ public static class MoveOrdering
 {
     public const int MaxPly = 128;
 
+	    [ThreadStatic]
+	    private static ThreadLocalSearchState? _tls;
+	    public static void SetThreadState(ThreadLocalSearchState? state) => _tls = state;
+
+
     // Killer moves: two per ply
     private static Move[,] _killers = new Move[MaxPly, 2];
     // History heuristic table: from x to (64x64)
@@ -83,13 +88,17 @@ public static class MoveOrdering
         }
 
         // Killers (quiet only)
-        ref var k0 = ref _killers[ply, 0];
-        ref var k1 = ref _killers[ply, 1];
+        // Use thread-local killers/history if available
+        var killers = _tls?.Killers ?? _killers;
+        var history = _tls?.History ?? _history;
+
+        ref var k0 = ref killers[ply, 0];
+        ref var k1 = ref killers[ply, 1];
         if (IsSameMove(m, k0)) return 300_000;
         if (IsSameMove(m, k1)) return 299_000;
 
         // History for quiets
-        return _history[m.From, m.To];
+        return history[m.From, m.To];
     }
 
     public static void Sort(Span<Move> moves, Span<int> scores)
@@ -115,9 +124,11 @@ public static class MoveOrdering
     {
         if (!IsCapture(m))
         {
+            var killers = _tls?.Killers ?? _killers;
+            var history = _tls?.History ?? _history;
             // Update killers
-            ref var k0 = ref _killers[ply, 0];
-            ref var k1 = ref _killers[ply, 1];
+            ref var k0 = ref killers[ply, 0];
+            ref var k1 = ref killers[ply, 1];
             if (!IsSameMove(m, k0))
             {
                 k1 = k0;
@@ -125,18 +136,19 @@ public static class MoveOrdering
             }
             // Update history (depth^2)
             int bonus = depth * depth;
-            int newVal = _history[m.From, m.To] + bonus;
+            int newVal = history[m.From, m.To] + bonus;
             // Clamp to avoid overflow
             if (newVal > 1_000_000) newVal = 1_000_000;
-            _history[m.From, m.To] = newVal;
+            history[m.From, m.To] = newVal;
         }
     }
 
     public static void UpdateKillers(Move m, int ply)
     {
         // Simple killer update without history
-        ref var k0 = ref _killers[ply, 0];
-        ref var k1 = ref _killers[ply, 1];
+        var killers = _tls?.Killers ?? _killers;
+        ref var k0 = ref killers[ply, 0];
+        ref var k1 = ref killers[ply, 1];
         if (!IsSameMove(m, k0))
         {
             k1 = k0;
@@ -156,7 +168,7 @@ public static class MoveOrdering
 
     private static bool IsPromotion(Move move)
     {
-        return move.Flag >= MoveFlag.PromoQueen && move.Flag <= MoveFlag.PromoCaptureKnight;
+        return move.Flag is >= MoveFlag.PromoQueen and <= MoveFlag.PromoCaptureKnight;
     }
 
     private static PieceType GetAggressorType(Position pos, int from, Color us, bool isPromo)

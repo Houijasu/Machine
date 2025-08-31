@@ -7,7 +7,7 @@ namespace Machine.Optimization;
 public static class Prefetch
 {
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void TTEntry(AtomicTranspositionTable tt, ulong key)
+    public static void TTEntry(TranspositionTable tt, ulong key)
     {
         if (!Sse.IsSupported) return;
         // Placeholder: no address computation in stub

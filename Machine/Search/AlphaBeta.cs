@@ -18,7 +18,7 @@ public static class AlphaBeta
     private const int SingularDepth = 8;
     private const int SingularMargin = 2;
 
-    public static int Search(Position pos, int depth, int alpha, int beta, SearchEngine engine, ITranspositionTable tt, int ply = 0, bool doNullMove = true, PVTable? pvTable = null)
+    public static int Search(Position pos, int depth, int alpha, int beta, SearchEngine engine, ITranspositionTable tt, int ply = 0, bool doNullMove = true, PVTable? pvTable = null, LazySMPMetrics? metrics = null, int threadId = 0)
     {
         // Clear PV length for this ply
         pvTable?.ClearPly(ply);
@@ -50,12 +50,15 @@ public static class AlphaBeta
 
         // Transposition table probe
         var ttEntry = tt.Probe(pos);
+        metrics?.RecordTTAccess(threadId, ttEntry.IsValid);
         Move ttMove = Move.NullMove;
         if (ttEntry.IsValid)
         {
             ttMove = ttEntry.BestMove;
             if (ttEntry.Depth >= depth)
             {
+                // Potential duplicate work indicator: another thread already searched sufficiently
+                metrics?.RecordDuplicateWork();
                 if (ttEntry.Flag == TTFlag.Exact)
                     return ttEntry.Score;
                 else if (ttEntry.Flag == TTFlag.Alpha && ttEntry.Score <= alpha)
@@ -76,8 +79,8 @@ public static class AlphaBeta
             
             // Temporarily exclude the TT move to test if it's singular
             // We do this by searching with a null window below the TT score
-            int singularScore = SearchSingular(pos, reducedDepth, singularBeta - 1, singularBeta, engine, tt, ply, ttMove);
-            
+            int singularScore = SearchSingular(pos, reducedDepth, singularBeta - 1, singularBeta, engine, tt, ply, ttMove, metrics, threadId);
+
             // If all other moves fail low, the TT move is singular - extend it
             if (singularScore < singularBeta)
             {
@@ -98,7 +101,7 @@ public static class AlphaBeta
                 pos.MakeNullMove();
 
                 // Search with reduced depth
-                int nullScore = -Search(pos, depth - 1 - NullMoveReduction, -beta, -beta + 1, engine, tt, ply + 1, false, pvTable);
+                int nullScore = -Search(pos, depth - 1 - NullMoveReduction, -beta, -beta + 1, engine, tt, ply + 1, false, pvTable, metrics, threadId);
 
                 // Undo null move
                 pos.UndoNullMove();
@@ -229,21 +232,21 @@ public static class AlphaBeta
                     {
                         if (engine.EnableDebugInfo) engine.IncrementLMRReductions();
                         int reduction = Math.Min(2, depth / 4);
-                        score = -Search(pos, newDepth - reduction, -alpha - 1, -alpha, engine, tt, ply + 1, true, pvTable);
+                        score = -Search(pos, newDepth - reduction, -alpha - 1, -alpha, engine, tt, ply + 1, true, pvTable, metrics, threadId);
 
                         // If LMR search fails high, do full search
                         if (score > alpha)
-                            score = -Search(pos, newDepth, -beta, -alpha, engine, tt, ply + 1, true, pvTable);
+                            score = -Search(pos, newDepth, -beta, -alpha, engine, tt, ply + 1, true, pvTable, metrics, threadId);
                     }
                     else
                     {
                         // Null window search
-                        score = -Search(pos, newDepth, -alpha - 1, -alpha, engine, tt, ply + 1, true, pvTable);
+                        score = -Search(pos, newDepth, -alpha - 1, -alpha, engine, tt, ply + 1, true, pvTable, metrics, threadId);
                     }
 
                     // If null window search fails high, do full search
                     if (score > alpha && score < beta)
-                        score = -Search(pos, newDepth, -beta, -alpha, engine, tt, ply + 1, true, pvTable);
+                        score = -Search(pos, newDepth, -beta, -alpha, engine, tt, ply + 1, true, pvTable, metrics, threadId);
                 }
             }
             else
@@ -312,7 +315,7 @@ public static class AlphaBeta
     }
     
     // Search excluding a specific move to test if it's singular
-    private static int SearchSingular(Position pos, int depth, int alpha, int beta, SearchEngine engine, ITranspositionTable tt, int ply, Move excludeMove)
+    private static int SearchSingular(Position pos, int depth, int alpha, int beta, SearchEngine engine, ITranspositionTable tt, int ply, Move excludeMove, LazySMPMetrics? metrics, int threadId)
     {
         if (depth <= 0)
             return Quiescence.Search(pos, alpha, beta, engine);
@@ -350,7 +353,7 @@ public static class AlphaBeta
             
             if (isLegal)
             {
-                int score = -Search(pos, depth - 1, -beta, -alpha, engine, tt, ply + 1, true, null);
+                int score = -Search(pos, depth - 1, -beta, -alpha, engine, tt, ply + 1, true, null, metrics, threadId);
                 bestScore = Math.Max(bestScore, score);
                 
                 if (score >= beta)

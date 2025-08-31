@@ -16,22 +16,22 @@ if (args.Length >= 2 && (args[0] == "--perft" || args[0] == "--divide"))
     }
 }
 
-if (args.Length >= 1 && args[0] == "--test-atomic-tt")
+if (args is ["--test-atomic-tt", ..])
 {
     Console.WriteLine("Testing Atomic TT vs Standard TT...");
     var pos = new Position();
     pos.SetStartPosition();
     
-    // Test with standard TT
-    var standardEngine = new SearchEngine(16, false);
+    // Test with CompactTT (now the default)
+    var standardEngine = new SearchEngine(16);
     standardEngine.SetPosition(pos);
     var limits = new SearchLimits { MaxDepth = 4 };
     var start = DateTime.UtcNow;
     var standardResult = standardEngine.Search(limits);
     var standardTime = DateTime.UtcNow - start;
     
-    // Test with atomic TT
-    var atomicEngine = new SearchEngine(16, true);
+    // Test with another instance (same implementation)
+    var atomicEngine = new SearchEngine(16);
     atomicEngine.SetPosition(pos);
     start = DateTime.UtcNow;
     var atomicResult = atomicEngine.Search(limits);

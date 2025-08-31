@@ -28,7 +28,7 @@ public readonly struct Move
         char toRank = (char)('1' + To / 8);
         
         string promotion = "";
-        if (Flag >= MoveFlag.PromoQueen && Flag <= MoveFlag.PromoCaptureKnight)
+        if (Flag is >= MoveFlag.PromoQueen and <= MoveFlag.PromoCaptureKnight)
         {
             promotion = Flag switch
             {

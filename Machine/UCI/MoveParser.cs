@@ -64,7 +64,7 @@ internal static class MoveParser
 
     private static bool IsPromotion(MoveFlag flag)
     {
-        return flag >= MoveFlag.PromoQueen && flag <= MoveFlag.PromoCaptureKnight;
+        return flag is >= MoveFlag.PromoQueen and <= MoveFlag.PromoCaptureKnight;
     }
 }
 
