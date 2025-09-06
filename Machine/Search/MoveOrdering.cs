@@ -82,14 +82,14 @@ public static class MoveOrdering
         // Counter-move gets high priority (below TT move but above killers)
         if (lastMove.From >= 0 && lastMove.To >= 0 && IsSameMove(m, _counterMoves[lastMove.From, lastMove.To]))
         {
-            int baseScore = 500_000;
+            int counterScore = 500_000;
             if (_dynamicMoveOrdering)
             {
                 // Dynamic adjustment based on position and depth
-                int dynamicScore = baseScore * aggressivenessMultiplier / 100;
+                int dynamicScore = counterScore * aggressivenessMultiplier / 100;
                 return Math.Min(dynamicScore, 999_999); // Cap below TT move
             }
-            return baseScore;
+            return counterScore;
         }
 
         // Promotions boost

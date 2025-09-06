@@ -1,0 +1,4 @@
+uci
+setoption name UsePEXT value auto
+isready
+quit

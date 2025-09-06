@@ -824,8 +824,6 @@ public sealed class SearchEngine
         _singularExtensions = 0;
         _checkExtensions = 0;
         _lmrReductions = 0;
-            // This is misplaced - MultiPV should be a property of SearchResult, not inside ResetDebugCounters
-        }
     }
     
     public SyzygyTablebase? GetSyzygyTablebase() => _syzygyTablebase;
@@ -840,22 +838,23 @@ public sealed class SearchEngine
     }
 
     public sealed class SearchResult
-{
-    public Move BestMove { get; set; }
-    public int Score { get; set; }
-    public int Depth { get; set; }
-    public int SelectiveDepth { get; set; }
-    public ulong NodesSearched { get; set; }
-    public TimeSpan SearchTime { get; set; }
-    public string? Error { get; set; }
-    public Move[]? MultiPV { get; set; }
-}
+    {
+        public Move BestMove { get; set; }
+        public int Score { get; set; }
+        public int Depth { get; set; }
+        public int SelectiveDepth { get; set; }
+        public ulong NodesSearched { get; set; }
+        public TimeSpan SearchTime { get; set; }
+        public string? Error { get; set; }
+        public Move[]? MultiPV { get; set; }
+    }
 
-public sealed class SearchLimits
-{
-    public int MaxDepth { get; set; } = 64;
-    public TimeSpan? TimeLimit { get; set; }
-    public ulong? NodeLimit { get; set; }
-    public DateTime StartTime { get; set; } = DateTime.UtcNow;
-    public bool Infinite { get; set; }
+    public sealed class SearchLimits
+    {
+        public int MaxDepth { get; set; } = 64;
+        public TimeSpan? TimeLimit { get; set; }
+        public ulong? NodeLimit { get; set; }
+        public DateTime StartTime { get; set; } = DateTime.UtcNow;
+        public bool Infinite { get; set; }
+    }
 }

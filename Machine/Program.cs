@@ -31,7 +31,7 @@ if (args is ["--test-atomic-tt", ..])
     // Test with CompactTT (now the default)
     var standardEngine = new SearchEngine(16);
     standardEngine.SetPosition(pos);
-    var limits = new SearchLimits { MaxDepth = 4 };
+    var limits = new SearchEngine.SearchLimits { MaxDepth = 4 };
     var start = DateTime.UtcNow;
     var standardResult = standardEngine.Search(limits);
     var standardTime = DateTime.UtcNow - start;

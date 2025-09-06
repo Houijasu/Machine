@@ -413,6 +413,8 @@ public static class Evaluation
         }
         return flags;
     }
+    
+    private static int EvaluatePawnStructure(Position pos)
     {
         int score = 0;
         // Doubled, isolated, passed (very basic)

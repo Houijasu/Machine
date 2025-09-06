@@ -1,0 +1,6 @@
+uci
+setoption name UsePEXT value true
+isready
+position startpos
+go perft 3
+quit

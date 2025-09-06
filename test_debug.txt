@@ -1,0 +1,6 @@
+uci
+setoption name UsePEXT value auto
+isready
+position startpos
+go depth 6
+quit

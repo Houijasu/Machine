@@ -521,48 +521,47 @@ public sealed class UCIProtocol
                     break;
             }
         }
-        // Removed CompactTT and TTVariant options - CompactTT is now the only implementation
-    }
-    else if (name.Equals("SyzygyPath", StringComparison.OrdinalIgnoreCase))
-    {
-        var tb = _searchEngine.GetSyzygyTablebase();
-        if (tb != null)
+        else if (name.Equals("SyzygyPath", StringComparison.OrdinalIgnoreCase))
         {
-            tb.SetPath(value ?? "");
-            Send($"info string SyzygyPath set to {(string.IsNullOrEmpty(value) ? "<empty>" : value)}");
+            var tb = _searchEngine.GetSyzygyTablebase();
+            if (tb != null)
+            {
+                tb.SetPath(value ?? "");
+                Send($"info string SyzygyPath set to {(string.IsNullOrEmpty(value) ? "<empty>" : value)}");
+            }
         }
-    }
-    else if (name.Equals("SyzygyProbeDepth", StringComparison.OrdinalIgnoreCase) && int.TryParse(value, out var probeDepth))
-    {
-        var tb = _searchEngine.GetSyzygyTablebase();
-        if (tb != null)
+        else if (name.Equals("SyzygyProbeDepth", StringComparison.OrdinalIgnoreCase) && int.TryParse(value, out var probeDepth))
         {
-            tb.SetProbeDepth(probeDepth);
-            Send($"info string SyzygyProbeDepth set to {probeDepth}");
+            var tb = _searchEngine.GetSyzygyTablebase();
+            if (tb != null)
+            {
+                tb.SetProbeDepth(probeDepth);
+                Send($"info string SyzygyProbeDepth set to {probeDepth}");
+            }
         }
-    }
-    else if (name.Equals("SyzygyProbeLimit", StringComparison.OrdinalIgnoreCase) && int.TryParse(value, out var probeLimit))
-    {
-        var tb = _searchEngine.GetSyzygyTablebase();
-        if (tb != null)
+        else if (name.Equals("SyzygyProbeLimit", StringComparison.OrdinalIgnoreCase) && int.TryParse(value, out var probeLimit))
         {
-            tb.SetProbeLimit(probeLimit);
-            Send($"info string SyzygyProbeLimit set to {probeLimit}");
+            var tb = _searchEngine.GetSyzygyTablebase();
+            if (tb != null)
+            {
+                tb.SetProbeLimit(probeLimit);
+                Send($"info string SyzygyProbeLimit set to {probeLimit}");
+            }
         }
-    }
-    else if (name.Equals("SyzygyMaxCardinality", StringComparison.OrdinalIgnoreCase) && int.TryParse(value, out var maxCardinality))
-    {
-        var tb = _searchEngine.GetSyzygyTablebase();
-        if (tb != null)
+        else if (name.Equals("SyzygyMaxCardinality", StringComparison.OrdinalIgnoreCase) && int.TryParse(value, out var maxCardinality))
         {
-            tb.SetOptions(tb.IsEnabled(), true, true, maxCardinality);
-            Send($"info string SyzygyMaxCardinality set to {maxCardinality}");
+            var tb = _searchEngine.GetSyzygyTablebase();
+            if (tb != null)
+            {
+                tb.SetOptions(tb.IsEnabled(), true, true, maxCardinality);
+                Send($"info string SyzygyMaxCardinality set to {maxCardinality}");
+            }
         }
     }
 
     private void HandleGo(string line)
     {
-        var limits = new SearchLimits();
+        var limits = new SearchEngine.SearchLimits();
 
         // Parse go command parameters per UCI
         int? wtime = null, btime = null, winc = null, binc = null, movestogo = null;

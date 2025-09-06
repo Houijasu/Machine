@@ -154,7 +154,7 @@ public class PawnHashTable
     
     public PawnHashStats GetStats()
     {
-        return new PawnHashStats(_probes, _hits, _stores, _isolatedPawns, _doubledPawns, _passedPawns, _openFiles, _halfOpenFiles);
+        return new PawnHashStats((long)_probes, (long)_hits, (long)_stores, (long)_isolatedPawns, (long)_doubledPawns, (long)_passedPawns, (long)_openFiles, (long)_halfOpenFiles);
     }
     
     // Helper to compute pawn structure key (only pawn positions)

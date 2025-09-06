@@ -1,0 +1,6 @@
+setoption name Threads value 4
+setoption name Hash value 512
+setoption name WorkStealing value true
+position startpos
+go depth 12
+quit

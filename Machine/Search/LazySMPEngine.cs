@@ -38,7 +38,7 @@ public sealed class LazySMPEngine
         _metrics = new LazySMPMetrics(_threads, _sharedTT);
     }
 
-    public SearchResult Search(Position root, SearchLimits limits)
+    public SearchEngine.SearchResult Search(Position root, SearchEngine.SearchLimits limits)
     {
         var start = DateTime.UtcNow;
         var hardDeadline = limits.TimeLimit.HasValue ? start + limits.TimeLimit.Value : (DateTime?)null;
@@ -251,7 +251,7 @@ public sealed class LazySMPEngine
 
         // Build result with aggregated nodes
         long total = Volatile.Read(ref totalNodes[0]) + Volatile.Read(ref totalNodes[1]);
-        return new SearchResult
+        return new SearchEngine.SearchResult
         {
             BestMove = bestMove,
             Score = bestScore,
