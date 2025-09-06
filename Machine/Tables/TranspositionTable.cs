@@ -15,21 +15,31 @@ public enum TTFlag : byte
 
 public struct TTEntry
 {
-    public ulong Key;
-    public Move BestMove;
-    public int Score;
-    public byte Depth;
-    public TTFlag Flag;
-    public byte Age;
+    public ulong Key;           // 8 bytes
+    public Move BestMove;       // 4 bytes (assuming Move is 4 bytes)
+    public int Score;           // 4 bytes
+    public byte Depth;          // 1 byte
+    public TTFlag Flag;         // 1 byte
+    public byte Age;            // 1 byte
+    public byte AbdadaCount;    // 1 byte - Number of threads searching this position
+    public byte AbdadaDepth;    // 1 byte - Depth of ongoing searches
+    // Total: 21 bytes, add 3 bytes padding to make 24 bytes (multiple of 8)
 
     public bool IsValid => Flag != TTFlag.None;
+    public bool IsBeingSearched => AbdadaCount > 0;
 }
 
 public sealed class TranspositionTable : ITranspositionTable
 {
     private const int BucketSize = 4;
     private const int MaxAge = 63;
+    private int _agingDepthThreshold = 8; // Default threshold for depth-weighted aging
 
+    // Optimized cache-line aligned bucket
+    // Each TTEntry is 24 bytes (including padding), 4 entries = 96 bytes
+    // Version is 4 bytes, total 100 bytes
+    // We'll add padding to align to 128 bytes (2 cache lines) for better performance
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, Pack = 1)]
     private sealed class Bucket
     {
         public TTEntry Entry0;
@@ -37,6 +47,10 @@ public sealed class TranspositionTable : ITranspositionTable
         public TTEntry Entry2;
         public TTEntry Entry3;
         public volatile int Version; // seqlock: even = stable, odd = write in progress
+        private int _padding0;       // 4 bytes padding
+        private long _padding1;      // 8 bytes padding
+        private long _padding2;      // 8 bytes padding
+        // Total: 128 bytes (2 cache lines)
     }
 
     private Bucket[] _buckets = [];
@@ -50,6 +64,11 @@ public sealed class TranspositionTable : ITranspositionTable
 	    private long _sameKeyStores;
 	    private long _replacementStores;
 	    private long _emptySlotStores;
+	    private long _abdadaHits;        // Times we deferred work due to ABDADA
+	    private long _collisions;        // Times all slots were full with different keys
+	    private long _depthEvictions;    // Times we evicted a deeper entry
+	    private long _exactEvictions;    // Times we evicted an EXACT entry
+	    private long _skippedWrites;     // Times we skipped identical writes
 
 
 
@@ -94,21 +113,69 @@ public sealed class TranspositionTable : ITranspositionTable
         Interlocked.Exchange(ref _sameKeyStores, 0);
         Interlocked.Exchange(ref _replacementStores, 0);
         Interlocked.Exchange(ref _emptySlotStores, 0);
+        Interlocked.Exchange(ref _abdadaHits, 0);
+        Interlocked.Exchange(ref _collisions, 0);
+        Interlocked.Exchange(ref _depthEvictions, 0);
+        Interlocked.Exchange(ref _exactEvictions, 0);
+        Interlocked.Exchange(ref _skippedWrites, 0);
     }
 
     public void NewSearch()
     {
+        // For depth-weighted aging, we'll handle aging during store operations
+        // rather than incrementing globally. This allows us to age entries
+        // based on their depth.
         _currentAge = (byte)((_currentAge + 1) & MaxAge);
+    }
+
+    public void SetAgingDepthThreshold(int threshold)
+    {
+        _agingDepthThreshold = Math.Max(1, Math.Min(63, threshold));
+    }
+
+    // Cache prefetch hint: touch likely bucket version to bring line into cache
+    // Safe no-op on any platform; just a speculative read.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Prefetch(ulong key)
+    {
+        int idx = (int)(key & (uint)(_bucketCount - 1));
+        var b = _buckets[idx];
+        // Lightweight read; ignore value. This tends to pull bucket metadata and possibly entries into cache.
+        _ = b.Version;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void BeginWrite(Bucket b)
+    {
+        while (true)
+        {
+            int v = b.Version;
+            if ((v & 1) != 0) { Thread.SpinWait(1); continue; } // writer active
+            if (Interlocked.CompareExchange(ref b.Version, v + 1, v) == v)
+            {
+                Thread.MemoryBarrier(); // acquire
+                return;
+            }
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void EndWrite(Bucket b)
+    {
+        Thread.MemoryBarrier(); // release
+        Interlocked.Increment(ref b.Version); // back to even
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool TryStableRead(Bucket b, out TTEntry e0, out TTEntry e1, out TTEntry e2, out TTEntry e3)
     {
         e0 = e1 = e2 = e3 = default;
-        int v1 = Volatile.Read(ref b.Version);
+        // Read version without passing volatile field by ref
+        int v1 = b.Version;
         if ((v1 & 1) != 0) return false; // writer in progress
         e0 = b.Entry0; e1 = b.Entry1; e2 = b.Entry2; e3 = b.Entry3;
-        int v2 = Volatile.Read(ref b.Version);
+        Thread.MemoryBarrier(); // Ensure reads complete before re-reading version
+        int v2 = b.Version;
         return v1 == v2 && (v2 & 1) == 0;
     }
 
@@ -157,7 +224,7 @@ public sealed class TranspositionTable : ITranspositionTable
         int idx = (int)(key & (uint)(_bucketCount - 1));
         var b = _buckets[idx];
 
-        Interlocked.Increment(ref b.Version); // become odd
+        BeginWrite(b);
         try
         {
             // Ref locals for hot path checks to avoid extra copies
@@ -166,14 +233,14 @@ public sealed class TranspositionTable : ITranspositionTable
             ref TTEntry e2 = ref b.Entry2;
             ref TTEntry e3 = ref b.Entry3;
 
-            // Same-key or empty slot fast paths (also increment counters)
-            if (e0.Key == key) { Interlocked.Increment(ref _sameKeyStores); Write(ref e0); return; }
+            // Same-key or empty slot fast paths with rewrite skipping
+            if (e0.Key == key) { Interlocked.Increment(ref _sameKeyStores); if (!ShouldSkipRewrite(in e0)) Write(ref e0); return; }
             if (!e0.IsValid) { Interlocked.Increment(ref _emptySlotStores); Write(ref e0); return; }
-            if (e1.Key == key) { Interlocked.Increment(ref _sameKeyStores); Write(ref e1); return; }
+            if (e1.Key == key) { Interlocked.Increment(ref _sameKeyStores); if (!ShouldSkipRewrite(in e1)) Write(ref e1); return; }
             if (!e1.IsValid) { Interlocked.Increment(ref _emptySlotStores); Write(ref e1); return; }
-            if (e2.Key == key) { Interlocked.Increment(ref _sameKeyStores); Write(ref e2); return; }
+            if (e2.Key == key) { Interlocked.Increment(ref _sameKeyStores); if (!ShouldSkipRewrite(in e2)) Write(ref e2); return; }
             if (!e2.IsValid) { Interlocked.Increment(ref _emptySlotStores); Write(ref e2); return; }
-            if (e3.Key == key) { Interlocked.Increment(ref _sameKeyStores); Write(ref e3); return; }
+            if (e3.Key == key) { Interlocked.Increment(ref _sameKeyStores); if (!ShouldSkipRewrite(in e3)) Write(ref e3); return; }
             if (!e3.IsValid) { Interlocked.Increment(ref _emptySlotStores); Write(ref e3); return; }
 
             // Score existing entries: lower => better victim
@@ -187,34 +254,182 @@ public sealed class TranspositionTable : ITranspositionTable
             int best = s0;
             if (s1 < best) { best = s1; victim = ref e1; }
             if (s2 < best) { best = s2; victim = ref e2; }
-            if (s3 < best) { /*best = s3;*/ victim = ref e3; }
+            if (s3 < best) { best = s3; victim = ref e3; }
 
+            // Track eviction metrics before overwriting
+            if (victim.IsValid)
+            {
+                if (victim.Depth > depth) Interlocked.Increment(ref _depthEvictions);
+                if (victim.Flag == TTFlag.Exact) Interlocked.Increment(ref _exactEvictions);
+            }
+            else
+            {
+                // All slots were full - collision
+                Interlocked.Increment(ref _collisions);
+            }
+            
             Interlocked.Increment(ref _replacementStores);
             Write(ref victim);
             return;
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            bool ShouldSkipRewrite(in TTEntry existing)
+            {
+                // Avoid identical or worse rewrites to reduce cache traffic
+                int newDepth = Math.Clamp(depth, 0, 255);
+                bool identical = existing.IsValid && existing.BestMove.Equals(bestMove) && existing.Score == score && existing.Flag == flag && existing.Depth >= newDepth;
+                if (identical)
+                {
+                    Interlocked.Increment(ref _skippedWrites);
+                    return true;
+                }
+
+                // Protect deeper EXACT from being overwritten by bounds or qsearch
+                if (existing.IsValid && existing.Flag == TTFlag.Exact && existing.Depth >= newDepth && flag != TTFlag.Exact)
+                {
+                    if (existing.Depth > newDepth) Interlocked.Increment(ref _depthEvictions);
+                    return true;
+                }
+
+                // Avoid letting qsearch (depth==0) overwrite deeper entries
+                if (newDepth == 0 && existing.IsValid && existing.Depth > 0)
+                    return true;
+
+                return false;
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             void Write(ref TTEntry dst)
             {
-                dst.Key = key;
+                // Payload first; seqlock version will close the write
                 dst.BestMove = bestMove;
                 dst.Score = score;
                 dst.Depth = (byte)Math.Clamp(depth, 0, 255);
                 dst.Flag = flag;
                 dst.Age = _currentAge;
+                dst.AbdadaCount = 0; // Clear ABDADA reservation on normal store
+                dst.AbdadaDepth = 0;
+                dst.Key = key; // publish key last within the seqlock window
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             int ScoreForReplace(in TTEntry e)
             {
-                // Prefer replacing shallower and older entries
+                if (!e.IsValid) return int.MinValue + 1;
+                // Prefer replacing older and shallower entries; protect EXACT and deep entries; de-prioritize qsearch (depth==0)
                 int ageDiff = ((_currentAge - e.Age) & MaxAge);
-                return e.IsValid ? (e.Depth * 256 + (MaxAge - ageDiff)) : int.MinValue + 1;
+                
+                // Depth-weighted aging: deeper entries age slower
+                // Entries deeper than threshold get reduced aging effect
+                int effectiveAgeDiff = e.Depth >= _agingDepthThreshold ?
+                    ageDiff / 2 : // Half aging effect for deep entries
+                    ageDiff;      // Full aging effect for shallow entries
+                
+                int scoreBase = (e.Depth << 8) + (MaxAge - effectiveAgeDiff);
+                if (e.Flag == TTFlag.Exact) scoreBase += 1 << 20; // make much less likely to be evicted
+                if (e.Depth == 0) scoreBase -= 1 << 18;            // prefer evicting qsearch entries
+                return scoreBase;
             }
         }
         finally
         {
-            Interlocked.Increment(ref b.Version); // back to even
+            EndWrite(b);
+        }
+    }
+
+    // ABDADA: Try to reserve a position for searching
+    public bool TryStartSearch(Position pos, int depth)
+    {
+        ulong key = pos.ZobristKey;
+        int idx = (int)(key & (uint)(_bucketCount - 1));
+        var b = _buckets[idx];
+
+        BeginWrite(b);
+        try
+        {
+            ref TTEntry e0 = ref b.Entry0;
+            ref TTEntry e1 = ref b.Entry1;
+            ref TTEntry e2 = ref b.Entry2;
+            ref TTEntry e3 = ref b.Entry3;
+
+            // Find matching entry and check/update ABDADA status
+            if (e0.Key == key)
+            {
+                if (e0.AbdadaCount > 0 && e0.AbdadaDepth >= depth)
+                {
+                    Interlocked.Increment(ref _abdadaHits);
+                    return false; // Someone else is searching at sufficient depth
+                }
+                e0.AbdadaCount++;
+                e0.AbdadaDepth = (byte)Math.Max(e0.AbdadaDepth, Math.Min(depth, 255));
+                return true;
+            }
+            if (e1.Key == key)
+            {
+                if (e1.AbdadaCount > 0 && e1.AbdadaDepth >= depth)
+                {
+                    Interlocked.Increment(ref _abdadaHits);
+                    return false;
+                }
+                e1.AbdadaCount++;
+                e1.AbdadaDepth = (byte)Math.Max(e1.AbdadaDepth, Math.Min(depth, 255));
+                return true;
+            }
+            if (e2.Key == key)
+            {
+                if (e2.AbdadaCount > 0 && e2.AbdadaDepth >= depth)
+                {
+                    Interlocked.Increment(ref _abdadaHits);
+                    return false;
+                }
+                e2.AbdadaCount++;
+                e2.AbdadaDepth = (byte)Math.Max(e2.AbdadaDepth, Math.Min(depth, 255));
+                return true;
+            }
+            if (e3.Key == key)
+            {
+                if (e3.AbdadaCount > 0 && e3.AbdadaDepth >= depth)
+                {
+                    Interlocked.Increment(ref _abdadaHits);
+                    return false;
+                }
+                e3.AbdadaCount++;
+                e3.AbdadaDepth = (byte)Math.Max(e3.AbdadaDepth, Math.Min(depth, 255));
+                return true;
+            }
+
+            // Not found - we can search it (will be stored later)
+            return true;
+        }
+        finally
+        {
+            EndWrite(b);
+        }
+    }
+
+    // ABDADA: Mark search as complete
+    public void EndSearch(Position pos)
+    {
+        ulong key = pos.ZobristKey;
+        int idx = (int)(key & (uint)(_bucketCount - 1));
+        var b = _buckets[idx];
+
+        BeginWrite(b);
+        try
+        {
+            ref TTEntry e0 = ref b.Entry0;
+            ref TTEntry e1 = ref b.Entry1;
+            ref TTEntry e2 = ref b.Entry2;
+            ref TTEntry e3 = ref b.Entry3;
+
+            if (e0.Key == key && e0.AbdadaCount > 0) { e0.AbdadaCount--; return; }
+            if (e1.Key == key && e1.AbdadaCount > 0) { e1.AbdadaCount--; return; }
+            if (e2.Key == key && e2.AbdadaCount > 0) { e2.AbdadaCount--; return; }
+            if (e3.Key == key && e3.AbdadaCount > 0) { e3.AbdadaCount--; return; }
+        }
+        finally
+        {
+            EndWrite(b);
         }
     }
 
@@ -264,6 +479,23 @@ public sealed class TranspositionTable : ITranspositionTable
         long sameKey = Volatile.Read(ref _sameKeyStores);
         long repl = Volatile.Read(ref _replacementStores);
         long empty = Volatile.Read(ref _emptySlotStores);
-        return new TTStats(probes, hits, stores, sameKey, repl, empty);
+        long abdada = Volatile.Read(ref _abdadaHits);
+        long collisions = Volatile.Read(ref _collisions);
+        long depthEvictions = Volatile.Read(ref _depthEvictions);
+        long exactEvictions = Volatile.Read(ref _exactEvictions);
+        long skippedWrites = Volatile.Read(ref _skippedWrites);
+        return new TTStats(probes, hits, stores, sameKey, repl, empty, abdada, collisions, depthEvictions, exactEvictions, skippedWrites);
+    }
+
+    // Extended statistics for performance analysis
+    public (long abdada, long collisions, long depthEvict, long exactEvict, long skipped) GetExtendedStats()
+    {
+        return (
+            Volatile.Read(ref _abdadaHits),
+            Volatile.Read(ref _collisions),
+            Volatile.Read(ref _depthEvictions),
+            Volatile.Read(ref _exactEvictions),
+            Volatile.Read(ref _skippedWrites)
+        );
     }
 }

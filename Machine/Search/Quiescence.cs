@@ -91,23 +91,8 @@ public static class Quiescence
     
     private static int GenerateCaptures(Position pos, Span<Move> buffer)
     {
-        // For now, use the full move generator and filter captures
-        // TODO: Implement dedicated capture-only generator
-        Span<Move> allMoves = stackalloc Move[256];
-        int totalMoves = MoveGenerator.GenerateMoves(pos, allMoves);
-        
-        int captureCount = 0;
-        for (int i = 0; i < totalMoves; i++)
-        {
-            var move = allMoves[i];
-            if (IsCapture(move) || IsPromotion(move))
-            {
-                if (captureCount < buffer.Length)
-                    buffer[captureCount++] = move;
-            }
-        }
-        
-        return captureCount;
+        // Use dedicated capture-only generator for quiescence
+        return MoveGenerator.GenerateCapturesOnly(pos, buffer);
     }
     
     private static bool IsCapture(Move move)

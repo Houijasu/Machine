@@ -186,7 +186,6 @@ public sealed class Position
         _zobristKey = key;
     }
 
-#if DEBUG
         public ulong ComputeZobristFromScratch()
         {
             ulong key = 0;
@@ -221,7 +220,6 @@ public sealed class Position
             message = string.Empty;
             return true;
         }
-#endif
 
 
 
@@ -563,11 +561,10 @@ public sealed class Position
         if (newEp != -1) _zobristKey ^= Zobrist.EnPassantFile[newEp % 8];
         if (u.EnPassant != -1) _zobristKey ^= Zobrist.EnPassantFile[u.EnPassant % 8];
 
-            if (CheckZobristOnUndo)
-            {
-                // After UndoMove restores state, zobrist should match saved hash from undo info
-                System.Diagnostics.Debug.Assert(_zobristKey == u.Hash, "Zobrist mismatch after undo");
-            }
+#if DEBUG
+            // After UndoMove restores state, zobrist should match saved hash from undo info
+            System.Diagnostics.Debug.Assert(_zobristKey == u.Hash, "Zobrist mismatch after undo");
+#endif
         }
 
 

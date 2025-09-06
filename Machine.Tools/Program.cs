@@ -25,7 +25,7 @@ static async Task<int> Main(string[] args)
         var meDivide = await machine.GoDivide(opts.Depth, opts.Verbose);
         var report = Comparator.CompareDivide(sfDivide, meDivide, opts);
         Console.WriteLine(report);
-        if (report.Contains("❌") && opts.StopOnError) return 1;
+        if (report.Contains('❌') && opts.StopOnError) return 1;
     }
     else
     {
@@ -154,7 +154,7 @@ sealed class UciProcess : IDisposable
             var l = await ReadLineAsync(timeoutMs: 50);
             if (l == null) break;
             if (l.StartsWith("bestmove")) break;
-            if (l.Contains(":"))
+            if (l.Contains(':'))
             {
                 var parts = l.Split(':', 2);
                 var move = parts[0].Trim();

@@ -38,6 +38,23 @@ dotnet test
 ### Performance Testing
 The engine includes extensive BenchmarkDotNet integration for performance analysis.
 
+### Parallel Search Configuration
+```bash
+# Use Work-Stealing (default for multi-threaded)
+dotnet run --project Machine
+# Then: setoption name Threads value 4
+
+# Force LazySMP mode (kill switch)
+# Then: setoption name UseLazySMP value true
+
+# Enable Work-Stealing metrics
+# Then: setoption name WorkStealing_ShowMetrics value true
+
+# Tune Work-Stealing thresholds
+# Then: setoption name WorkStealing_MinSplitDepth value 6
+# Then: setoption name WorkStealing_MinSplitMoves value 5
+```
+
 ## Core Architecture
 
 ### Bitboard-Based Representation
@@ -108,12 +125,25 @@ Standard positions for correctness validation:
 
 ## Current Status
 
-The engine achieves **perfect perft validation** through depth 3:
+### Move Generation
+The engine achieves **perfect perft validation** through depth 6:
 - Depth 1: 20 nodes ✅
 - Depth 2: 400 nodes ✅  
 - Depth 3: 8,902 nodes ✅
+- Depth 6: 119,060,324 nodes ✅
 
 All core chess rules are correctly implemented including castling through check, en passant legality, and promotion handling.
+
+### Parallel Search Performance
+**Work-Stealing** is now the default for multi-threaded analysis, delivering superior performance:
+- **4 threads**: 18.3M nodes @ 4.06M nps (2.7x more nodes than LazySMP)
+- **8 threads**: 17.9M nodes @ 4.20M nps (excellent scaling)
+- Features deepest-first selection, batch stealing, and efficient Apply/Undo
+
+**LazySMP** remains available as an alternative:
+- **4 threads**: 6.8M nodes @ 1.26M nps
+- **16 threads**: 21M nodes (good for very high thread counts)
+- Near-zero duplication with optimized settings (AspirationDelta=20)
 
 ## Framework and Dependencies
 

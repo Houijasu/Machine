@@ -106,6 +106,9 @@ public sealed class LazySMPEngine
                 int startDepth = 1;
                 if (_depthSkipping) startDepth = (id % 4) + 1;
 
+                // Allocate buffer once outside the loop to avoid CA2014
+                Span<Move> pvBuffer = stackalloc Move[256];
+                
                 for (int depth = startDepth; depth <= limits.MaxDepth && !Volatile.Read(ref stop); depth++)
                 {
                     // Early terminate on time
@@ -150,56 +153,47 @@ public sealed class LazySMPEngine
                         // Depth completion reporting: first thread to complete depth reports it
                         if (depth > Volatile.Read(ref _completedDepth))
                         {
-                            lock (bestLock)
+                            _completedDepth = depth;
+                            _depthBestMoves[depth] = move;
+                            _depthBestScores[depth] = score;
+
+                            // ALWAYS emit standard UCI depth info (not gated by _showInfo)
+                            // Rebuild PV from TT for consistent output
+                            var pvMoves = new System.Collections.Generic.List<Move>(32);
+                            var clone = root.Clone();
+                            // Apply move sequence from TT using SearchEngine helper
+                            // We use SearchEngine.BuildPV-like reconstruction via a minimal local method to avoid cross-deps
+                            // Using pvBuffer allocated outside the loop
+                            int safety = 0;
+                            while (safety++ < 32)
                             {
-                                if (depth > _completedDepth)
-                                {
-                                    _completedDepth = depth;
-                                    _depthBestMoves[depth] = move;
-                                    _depthBestScores[depth] = score;
-
-                                    if (_showInfo)
-                                    {
-                                        // Rebuild PV from TT for consistent output
-                                        var pvMoves = new System.Collections.Generic.List<Move>(32);
-                                        var clone = root.Clone();
-                                        // Apply move sequence from TT using SearchEngine helper
-                                        // We use SearchEngine.BuildPV-like reconstruction via a minimal local method to avoid cross-deps
-                                        Span<Move> buffer = stackalloc Move[256];
-                                        int safety = 0;
-                                        while (safety++ < 32)
-                                        {
-                                            var ttBest = _sharedTT.GetBestMove(clone);
-                                            if (ttBest.Equals(Move.NullMove)) break;
-                                            pvMoves.Add(ttBest);
-                                            clone.ApplyMove(ttBest);
-                                        }
-                                        for (int i = pvMoves.Count - 1; i >= 0; i--) clone.UndoMove(pvMoves[i]);
-
-                                        // Fallback to current thread PV if TT-based PV fails
-                                        if (pvMoves.Count == 0)
-                                        {
-                                            var pvArray = tls.PV.GetPV();
-                                            pvMoves.AddRange(pvArray);
-                                        }
-
-                                        // Emit UCI info line for this depth
-                                        long nodesSoFar = Volatile.Read(ref totalNodes[0]) + Volatile.Read(ref totalNodes[1]);
-                                        var elapsed = DateTime.UtcNow - start;
-                                        long nps = nodesSoFar * 1000 / Math.Max(1, (long)elapsed.TotalMilliseconds);
-                                        var sb = new System.Text.StringBuilder();
-                                        sb.Append($"info depth {depth} score cp {score} nodes {nodesSoFar} nps {nps} pv");
-                                        foreach (var mv in pvMoves)
-                                            sb.Append(' ').Append(mv.ToString());
-                                        Console.WriteLine(sb.ToString());
-                                    }
-                                }
+                                var ttBest = _sharedTT.GetBestMove(clone);
+                                if (ttBest.Equals(Move.NullMove)) break;
+                                pvMoves.Add(ttBest);
+                                clone.ApplyMove(ttBest);
                             }
-                        }
+                            for (int i = pvMoves.Count - 1; i >= 0; i--) clone.UndoMove(pvMoves[i]);
 
-                        {
-                            bestScore = score;
-                            bestMove = move;
+                            // Fallback to current thread PV if TT-based PV fails
+                            if (pvMoves.Count == 0)
+                            {
+                                var pvArray = tls.PV.GetPV();
+                                pvMoves.AddRange(pvArray);
+                            }
+
+                            // Emit UCI info line for this depth (match standard format)
+                            long nodesSoFar = Volatile.Read(ref totalNodes[0]) + Volatile.Read(ref totalNodes[1]);
+                            var elapsed = DateTime.UtcNow - start;
+                            long ms = Math.Max(1, (long)elapsed.TotalMilliseconds);
+                            long nps = nodesSoFar * 1000 / ms;
+                            int hashfull = _sharedTT.GetHashFull();
+                            int seldepth = engine.SelectiveDepth;
+                            
+                            var sb = new System.Text.StringBuilder();
+                            sb.Append($"info depth {depth} seldepth {seldepth} time {ms} nodes {nodesSoFar} nps {nps} hashfull {hashfull} score cp {score} pv");
+                            foreach (var mv in pvMoves)
+                                sb.Append(' ').Append(mv.ToString());
+                            Console.WriteLine(sb.ToString());
                         }
                     }
 

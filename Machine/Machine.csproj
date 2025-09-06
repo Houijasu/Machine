@@ -6,16 +6,11 @@
         <LangVersion>preview</LangVersion>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <NoWarn>CS7022</NoWarn>
     </PropertyGroup>
 
     <ItemGroup>
-      <PackageReference Include="BenchmarkDotNet" Version="0.15.2" />
-      <PackageReference Include="BenchmarkDotNet.Core" Version="0.10.14" />
-      <PackageReference Include="BenchmarkDotNet.Diagnostics.dotMemory" Version="0.15.2" />
-      <PackageReference Include="BenchmarkDotNet.Diagnostics.dotTrace" Version="0.15.2" />
-      <PackageReference Include="BenchmarkDotNet.Diagnostics.Windows" Version="0.15.2" />
-      <PackageReference Include="BenchmarkDotNet.TestAdapter" Version="0.15.2" />
-      <PackageReference Include="BenchmarkDotNet.Toolchains.Roslyn" Version="0.10.14" />
+      <PackageReference Include="BenchmarkDotNet" Version="0.13.12" />
       <PackageReference Include="Dunet" Version="1.11.3" />
       <PackageReference Include="Microsoft.ML" Version="5.0.0-preview.25373.1" />
       <PackageReference Include="Microsoft.ML.CodeGenerator" Version="0.23.0-preview.25373.1" />

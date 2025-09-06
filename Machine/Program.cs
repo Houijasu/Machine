@@ -2,7 +2,8 @@ using Machine.UCI;
 using Machine.Core;
 using Machine.Search;
 
-if (args.Length >= 2 && (args[0] == "--perft" || args[0] == "--divide"))
+// Top-level program - TUnit requires this format
+if (args.Length >= 2 && (args[0] == "--perft" || args[0] == "--divide" || args[0] == "--parallel-perft"))
 {
     var pos = new Position();
     pos.SetStartPosition();
@@ -10,8 +11,13 @@ if (args.Length >= 2 && (args[0] == "--perft" || args[0] == "--divide"))
     {
         if (args[0] == "--perft")
             Perft.PerftCommand(pos, depth, Console.WriteLine);
-        else
+        else if (args[0] == "--divide")
             Perft.Divide(pos, depth, Console.WriteLine);
+        else if (args[0] == "--parallel-perft")
+        {
+            int threads = args.Length >= 3 && int.TryParse(args[2], out var t) ? t : 4;
+            ParallelPerft.ParallelPerftCommand(pos, depth, threads, Console.WriteLine);
+        }
         return;
     }
 }

@@ -43,7 +43,6 @@ public static class MoveGenerator
         {
             ulong pawns = pos.Pieces(us, PieceType.Pawn);
             const ulong Rank2 = 0x000000000000FF00UL;
-            const ulong Rank7 = 0x00FF000000000000UL;
             const ulong Rank8 = 0xFF00000000000000UL;
 
             // single pushes
@@ -92,7 +91,6 @@ public static class MoveGenerator
         else
         {
             ulong pawns = pos.Pieces(us, PieceType.Pawn);
-            const ulong Rank2 = 0x00000000000000FFUL;
             const ulong Rank7 = 0x00FF000000000000UL;
             const ulong Rank1 = 0x00000000000000FFUL;
 
