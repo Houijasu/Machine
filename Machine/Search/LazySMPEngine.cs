@@ -207,7 +207,8 @@ public sealed class LazySMPEngine
                     prevQ = q;
 
                     // Early stop on mate found
-                    if (Math.Abs(score) >= 29000)
+                    // Safe mate detection
+                    if (score >= 29000 || score <= -29000)
                     {
                         Volatile.Write(ref stop, true);
                         break;

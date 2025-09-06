@@ -78,8 +78,8 @@ public sealed class SearchEngine
     public bool ZKeyAuditStopOnMismatch { get; private set; } = true;
     
     // Dynamic pruning options
-    private bool _dynamicPruning = true;
-    private int _pruningAggressiveness = 100; // 100% = normal
+    public bool _dynamicPruning = true;
+    public int _pruningAggressiveness = 100; // 100% = normal
 
 
     public void SetFeature(string name, bool enabled)
@@ -266,12 +266,13 @@ public sealed class SearchEngine
     public SearchResult Search(SearchLimits limits)
     {
         // Check for tablebase hit in root position
-        if (_syzygyTablebase?.IsEnabled() == true && CountPieces(_position) <= _syzygyTablebase.GetMaxCardinality())
+        int pieceCount = Bitboards.PopCount(_position.Occupancy[0] | _position.Occupancy[1]);
+        if (_syzygyTablebase?.IsEnabled() == true && pieceCount <= _syzygyTablebase.GetMaxCardinality())
         {
             var (tbScore, tbMove, tbFound) = _syzygyTablebase.Probe(_position, 0, 0);
             if (tbFound)
             {
-                var result = new SearchResult
+                var tbResult = new SearchResult
                 {
                     BestMove = tbMove,
                     Score = tbScore,
@@ -282,32 +283,12 @@ public sealed class SearchEngine
                 };
                 Console.WriteLine($"info string tablebase score cp {tbScore} dtz 0");
                 Console.WriteLine($"bestmove {tbMove}");
-                return result;
+                return tbResult;
             }
         }
         
         // Initialize multi-PV results
         var multiPVResults = new List<MultiPVResult>();
-        // Check for tablebase hit in root position
-        if (_syzygyTablebase?.IsEnabled() == true && CountPieces(_position) <= _syzygyTablebase.GetMaxCardinality())
-        {
-            var (tbScore, tbMove, tbFound) = _syzygyTablebase.Probe(_position, 0, 0);
-            if (tbFound)
-            {
-                var result = new SearchResult
-                {
-                    BestMove = tbMove,
-                    Score = tbScore,
-                    Depth = 0,
-                    NodesSearched = 0,
-                    SelectiveDepth = 0,
-                    SearchTime = TimeSpan.Zero
-                };
-                Console.WriteLine($"info string tablebase score cp {tbScore} dtz 0");
-                Console.WriteLine($"bestmove {tbMove}");
-                return result;
-            }
-        }
 
 	        // Initialize thread-local state for main thread
 	        _mainState ??= new ThreadLocalSearchState(0);
@@ -474,8 +455,8 @@ public sealed class SearchEngine
                 if (limits.TimeLimit.HasValue && DateTime.UtcNow >= limits.StartTime.Add(limits.TimeLimit.Value))
                     break;
 
-                // Stop on mate found
-                if (Math.Abs(result.Score) >= 29000)
+                // Stop on mate found (safe check)
+                if (result.Score >= AlphaBeta.MateValue - 100 || result.Score <= -(AlphaBeta.MateValue - 100))
                     break;
             }
         }
@@ -502,9 +483,14 @@ public sealed class SearchEngine
 
         int windowAlpha = alpha;
         int windowBeta = beta;
+        var ttEntry = _tt.Probe(_position);
 
         // Aspiration windows around lastScore
-        if (UseAspiration && _lastScore != int.MinValue && depth >= 4)
+        // CRITICAL FIX: Disable aspiration near mate bounds to prevent infinite loops
+        // Safe check for near-mate scores without overflow
+        bool nearMate = _lastScore >= AlphaBeta.MateValue - 100 || _lastScore <= -(AlphaBeta.MateValue - 100);
+        
+        if (UseAspiration && _lastScore != int.MinValue && depth >= 4 && !nearMate)
         {
             // Dynamic window size based on depth and position
             int baseDelta = 40;
@@ -512,7 +498,6 @@ public sealed class SearchEngine
             int ttDelta = 0;
             
             // Use TT score if available for better window
-            var ttEntry = _tt.Probe(_position);
             if (ttEntry.IsValid && ttEntry.Depth >= depth - 2)
             {
                 if (ttEntry.Flag == TTFlag.Exact)
@@ -548,26 +533,44 @@ public sealed class SearchEngine
 
             if (score <= windowAlpha)
             {
-                // Fail-low: widen downwards
-                int expand = (windowBeta - windowAlpha) * 2;
-                windowAlpha = Math.Max(alpha, windowAlpha - expand);
-                
-                // If we fail low multiple times, consider using TT score
-                if (ttEntry.IsValid && ttEntry.Flag == TTFlag.Alpha && ttEntry.Score > windowAlpha)
+                // Fail-low: if already at boundary, fall back to full window
+                if (windowAlpha <= alpha)
                 {
-                    windowAlpha = Math.Max(windowAlpha, ttEntry.Score);
+                    windowAlpha = alpha;
+                    windowBeta = beta;
+                }
+                else
+                {
+                    // Widen downwards
+                    int expand = (windowBeta - windowAlpha) * 2;
+                    windowAlpha = Math.Max(alpha, windowAlpha - expand);
+                    
+                    // If we fail low multiple times, consider using TT score
+                    if (ttEntry.IsValid && ttEntry.Flag == TTFlag.Alpha && ttEntry.Score > windowAlpha)
+                    {
+                        windowAlpha = Math.Max(windowAlpha, ttEntry.Score);
+                    }
                 }
             }
             else if (score >= windowBeta)
             {
-                // Fail-high: widen upwards
-                int expand = (windowBeta - windowAlpha) * 2;
-                windowBeta = Math.Min(beta, windowBeta + expand);
-                
-                // If we fail high multiple times, consider using TT score
-                if (ttEntry.IsValid && ttEntry.Flag == TTFlag.Beta && ttEntry.Score < windowBeta)
+                // Fail-high: if already at boundary, fall back to full window
+                if (windowBeta >= beta)
                 {
-                    windowBeta = Math.Min(windowBeta, ttEntry.Score);
+                    windowAlpha = alpha;
+                    windowBeta = beta;
+                }
+                else
+                {
+                    // Widen upwards
+                    int expand = (windowBeta - windowAlpha) * 2;
+                    windowBeta = Math.Min(beta, windowBeta + expand);
+                    
+                    // If we fail high multiple times, consider using TT score
+                    if (ttEntry.IsValid && ttEntry.Flag == TTFlag.Beta && ttEntry.Score < windowBeta)
+                    {
+                        windowBeta = Math.Min(windowBeta, ttEntry.Score);
+                    }
                 }
             }
             else break;
@@ -608,11 +611,20 @@ public sealed class SearchEngine
         int hashfull = _tt.GetHashFull();
         var sb = new StringBuilder();
         sb.Append($"info depth {depth} seldepth {selDepth} time {ms} nodes {nodes} nps {nps} hashfull {hashfull} ");
-        if (Math.Abs(score) >= 29000)
+        // Safe mate detection without Math.Abs overflow
+        if (score >= AlphaBeta.MateValue - 100)
         {
-            int mate = (30000 - Math.Abs(score) + 1) / 2;
-            if (score < 0) mate = -mate;
-            sb.Append($"score mate {mate} ");
+            // Positive mate score
+            int matePlies = AlphaBeta.MateValue - score;
+            int mateInMoves = (matePlies + 1) / 2; // Convert plies to moves
+            sb.Append($"score mate {mateInMoves} ");
+        }
+        else if (score <= -(AlphaBeta.MateValue - 100))
+        {
+            // Negative mate score
+            int matePlies = AlphaBeta.MateValue + score; // score is negative, so this subtracts
+            int mateInMoves = -((matePlies + 1) / 2); // Convert plies to moves, negate
+            sb.Append($"score mate {mateInMoves} ");
         }
         else
         {
@@ -633,11 +645,20 @@ public sealed class SearchEngine
         int hashfull = _tt.GetHashFull();
         var sb = new StringBuilder();
         sb.Append($"info multipv {pvNum} depth {depth} seldepth {selDepth} time {ms} nodes {nodes} nps {nps} hashfull {hashfull} ");
-        if (Math.Abs(score) >= 29000)
+        // Safe mate detection without Math.Abs overflow
+        if (score >= AlphaBeta.MateValue - 100)
         {
-            int mate = (30000 - Math.Abs(score) + 1) / 2;
-            if (score < 0) mate = -mate;
-            sb.Append($"score mate {mate} ");
+            // Positive mate score
+            int matePlies = AlphaBeta.MateValue - score;
+            int mateInMoves = (matePlies + 1) / 2; // Convert plies to moves
+            sb.Append($"score mate {mateInMoves} ");
+        }
+        else if (score <= -(AlphaBeta.MateValue - 100))
+        {
+            // Negative mate score
+            int matePlies = AlphaBeta.MateValue + score; // score is negative, so this subtracts
+            int mateInMoves = -((matePlies + 1) / 2); // Convert plies to moves, negate
+            sb.Append($"score mate {mateInMoves} ");
         }
         else
         {

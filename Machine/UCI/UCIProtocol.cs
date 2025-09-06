@@ -298,29 +298,29 @@ public sealed class UCIProtocol
         }
         else if (name.Equals("Eval", StringComparison.OrdinalIgnoreCase) && value != null)
         {
-            if (bool.TryParse(value, out var b)) Evaluation.SetOptions(b, Evaluation.UsePST, Evaluation.UsePawnStructure, Evaluation.UseKingSafety);
+            if (bool.TryParse(value, out var b)) Machine.Search.Evaluation.SetOptions(b, Machine.Search.Evaluation.UsePST, Machine.Search.Evaluation.UsePawnStructure, Machine.Search.Evaluation.UseKingSafety);
         }
         else if (name.Equals("UseNeuralNetwork", StringComparison.OrdinalIgnoreCase) && value != null && bool.TryParse(value, out var useNN))
         {
-            Evaluation.SetNeuralNetworkOptions(useNN, Evaluation.NeuralNetworkWeight);
+            Machine.Search.Evaluation.SetNeuralNetworkOptions(useNN, Machine.Search.Evaluation.NeuralNetworkWeight);
             Send($"info string UseNeuralNetwork set to {useNN}");
         }
         else if (name.Equals("NeuralNetworkWeight", StringComparison.OrdinalIgnoreCase) && value != null && int.TryParse(value, out var weight))
         {
-            Evaluation.SetNeuralNetworkOptions(Evaluation.UseNeuralNetwork, weight / 100.0f);
+            Machine.Search.Evaluation.SetNeuralNetworkOptions(Machine.Search.Evaluation.UseNeuralNetwork, weight / 100.0f);
             Send($"info string NeuralNetworkWeight set to {weight}%");
         }
         else if (name.Equals("PST", StringComparison.OrdinalIgnoreCase) && value != null)
         {
-            if (bool.TryParse(value, out var b)) Evaluation.SetOptions(Evaluation.UseEvaluation, b, Evaluation.UsePawnStructure, Evaluation.UseKingSafety);
+            if (bool.TryParse(value, out var b)) Machine.Search.Evaluation.SetOptions(Machine.Search.Evaluation.UseEvaluation, b, Machine.Search.Evaluation.UsePawnStructure, Machine.Search.Evaluation.UseKingSafety);
         }
         else if (name.Equals("PawnStructure", StringComparison.OrdinalIgnoreCase) && value != null)
         {
-            if (bool.TryParse(value, out var b)) Evaluation.SetOptions(Evaluation.UseEvaluation, Evaluation.UsePST, b, Evaluation.UseKingSafety);
+            if (bool.TryParse(value, out var b)) Machine.Search.Evaluation.SetOptions(Machine.Search.Evaluation.UseEvaluation, Machine.Search.Evaluation.UsePST, b, Machine.Search.Evaluation.UseKingSafety);
         }
         else if (name.Equals("KingSafety", StringComparison.OrdinalIgnoreCase) && value != null)
         {
-            if (bool.TryParse(value, out var b)) Evaluation.SetOptions(Evaluation.UseEvaluation, Evaluation.UsePST, Evaluation.UsePawnStructure, b);
+            if (bool.TryParse(value, out var b)) Machine.Search.Evaluation.SetOptions(Machine.Search.Evaluation.UseEvaluation, Machine.Search.Evaluation.UsePST, Machine.Search.Evaluation.UsePawnStructure, b);
         }
         else if (name.Equals("SingularExtensions", StringComparison.OrdinalIgnoreCase) && value != null)
         {

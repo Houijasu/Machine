@@ -112,31 +112,31 @@ public static class MoveOrdering
                         victimType = (PieceType)((victimIndex % 6) + 1);
                     }
                     var aggressorType = GetAggressorType(pos, m.From, pos.SideToMove, isPromo);
-                    int baseScore = 500_000 + (PieceValue[(int)victimType] * 10) - PieceValue[(int)aggressorType];
-                    if (isPromo) baseScore += 100; // prefer promoting captures
+                    int goodCaptureScore = 500_000 + (PieceValue[(int)victimType] * 10) - PieceValue[(int)aggressorType];
+                    if (isPromo) goodCaptureScore += 100; // prefer promoting captures
 
                     // Boost score based on SEE value
-                    baseScore += Math.Min(seeValue, 1000); // cap SEE bonus
+                    goodCaptureScore += Math.Min(seeValue, 1000); // cap SEE bonus
                     
                     if (_dynamicMoveOrdering)
                     {
                         // Dynamic adjustment based on position and depth
-                        int dynamicScore = baseScore * aggressivenessMultiplier / 100;
+                        int dynamicScore = goodCaptureScore * aggressivenessMultiplier / 100;
                         return Math.Min(dynamicScore, 499_999); // Cap below counter-move
                     }
-                    return baseScore;
+                    return goodCaptureScore;
                 }
                 else
                 {
                     // Bad captures get scored below killers but above quiet moves
-                    int baseScore = 100_000 + seeValue; // negative SEE will reduce score
+                    int badCaptureScore = 100_000 + seeValue; // negative SEE will reduce score
                     if (_dynamicMoveOrdering)
                     {
                         // Dynamic adjustment for bad captures
-                        int dynamicScore = baseScore * aggressivenessMultiplier / 100;
+                        int dynamicScore = badCaptureScore * aggressivenessMultiplier / 100;
                         return Math.Max(dynamicScore, 1); // Ensure positive score
                     }
-                    return baseScore;
+                    return badCaptureScore;
                 }
             }
             else
@@ -146,16 +146,16 @@ public static class MoveOrdering
                 PieceType victimType = PieceType.None;
                 if (pos.PieceAtFast(m.To, out victimIndex)) victimType = (PieceType)((victimIndex % 6) + 1);
                 var aggressorType = GetAggressorType(pos, m.From, pos.SideToMove, isPromo);
-                int baseScore = 500_000 + (PieceValue[(int)victimType] * 10) - PieceValue[(int)aggressorType];
-                if (isPromo) baseScore += 100;
+                int mvvLvaScore = 500_000 + (PieceValue[(int)victimType] * 10) - PieceValue[(int)aggressorType];
+                if (isPromo) mvvLvaScore += 100;
                 
                 if (_dynamicMoveOrdering)
                 {
                     // Dynamic adjustment based on position and depth
-                    int dynamicScore = baseScore * aggressivenessMultiplier / 100;
+                    int dynamicScore = mvvLvaScore * aggressivenessMultiplier / 100;
                     return Math.Min(dynamicScore, 499_999); // Cap below counter-move
                 }
-                return baseScore;
+                return mvvLvaScore;
             }
         }
 
@@ -170,15 +170,15 @@ public static class MoveOrdering
         if (IsSameMove(m, k1)) return 299_000;
 
         // History for quiets
-        int baseScore = history[m.From, m.To];
+        int historyScore = history[m.From, m.To];
         if (_dynamicMoveOrdering)
         {
             // Dynamic adjustment for quiet moves based on aggressiveness
-            int dynamicScore = baseScore * aggressivenessMultiplier / 100;
+            int dynamicScore = historyScore * aggressivenessMultiplier / 100;
             // Cap quiet moves below captures
             return Math.Min(dynamicScore, 99_999);
         }
-        return baseScore;
+        return historyScore;
     }
 
     public static void Sort(Span<Move> moves, Span<int> scores)

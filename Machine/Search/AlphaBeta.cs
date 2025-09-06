@@ -8,7 +8,7 @@ namespace Machine.Search;
 
 public static class AlphaBeta
 {
-    private const int MateValue = 30000;
+    public const int MateValue = 30000;
     private const int MateInMaxPly = MateValue - 1000;
 
     // Null move pruning parameters
@@ -21,6 +21,9 @@ public static class AlphaBeta
 
     public static int Search(Position pos, int depth, int alpha, int beta, SearchEngine engine, ITranspositionTable tt, int ply = 0, bool doNullMove = true, PVTable? pvTable = null, LazySMPMetrics? metrics = null, int threadId = 0)
     {
+        // Initialize lastMove for move ordering
+        Move lastMove = default;
+        
         // Clear PV length for this ply if we are a PV node
         if ((beta - alpha) > 1)
             pvTable?.ClearPly(ply);
@@ -156,7 +159,8 @@ public static class AlphaBeta
                 if (nullScore >= beta)
                 {
                     // Avoid returning mate scores from null move
-                    if (Math.Abs(nullScore) < MateInMaxPly)
+                    // Safe check without overflow
+                    if (nullScore > -MateInMaxPly && nullScore < MateInMaxPly)
                     {
                         if (engine.EnableDebugInfo) engine.IncrementNullMoveCutoffs();
                         return beta;
@@ -336,7 +340,7 @@ public static class AlphaBeta
             int allCount = MoveGenerator.GenerateMoves(pos, allMoves);
             if (allCount == 0)
             {
-                if (pos.IsKingInCheck(pos.SideToMove)) return -MateValue + depth; else return 0;
+                if (pos.IsKingInCheck(pos.SideToMove)) return -MateValue + ply; else return 0;
             }
             Span<int> allScores = stackalloc int[allCount];
             for (int i = 0; i < allCount; i++) allScores[i] = MoveOrdering.ScoreMove(pos, allMoves[i], ttMove, ply);
@@ -466,14 +470,13 @@ public static class AlphaBeta
         {
             // No legal moves - checkmate or stalemate
             if (pos.IsKingInCheck(pos.SideToMove))
-                return -MateValue + depth; // Mate in N moves
+                return -MateValue + ply; // Mate in N moves (ply-relative for proper distance)
             else
                 return 0; // Stalemate
         }
 
         // Score and order moves
         Span<int> scores = stackalloc int[moveCount];
-        Move lastMove = default; // Get last move from PV table or position
         if (ply > 0 && pvTable != null)
         {
             var pvMoves = pvTable.GetPV();
@@ -729,7 +732,7 @@ public static class AlphaBeta
         if (moveCount == 0)
         {
             if (pos.IsKingInCheck(pos.SideToMove))
-                return -MateValue + depth;
+                return -MateValue + ply;
             else
                 return 0;
         }
